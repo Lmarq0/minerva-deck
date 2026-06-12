@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MiNERVA Deck</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>MiNERVA Deck</h1>
+          <p id="subtitle">Selective torrent downloads for your own ROM library</p>
+        </div>
+        <div class="status-strip">
+          <span id="ariaStatus" class="pill muted">aria2c</span>
+          <span id="zipStatus" class="pill muted">7z</span>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="search-pane" aria-label="ROM search">
+          <div class="pane-head">
+            <label for="query">Search archive</label>
+            <span id="searchCount">Idle</span>
+          </div>
+          <input id="query" class="search-input" type="search" autocomplete="off" placeholder="Game, platform, region" />
+          <div id="results" class="results" aria-live="polite"></div>
+        </aside>
+
+        <section class="detail-pane" aria-label="Selected ROM">
+          <div class="selection">
+            <div class="pane-head">
+              <span>Selected ROM</span>
+              <button id="clearButton" class="icon-button" type="button" title="Clear selection" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <h2 id="selectedName">No ROM selected</h2>
+            <p id="selectedPath" class="path-line">Search and select one archive entry.</p>
+            <dl class="metadata">
+              <div><dt>Collection</dt><dd id="metaCollection">-</dd></div>
+              <div><dt>System</dt><dd id="metaSystem">-</dd></div>
+              <div><dt>EmuDeck Folder</dt><dd id="metaRoute">-</dd></div>
+              <div><dt>Size</dt><dd id="metaSize">-</dd></div>
+              <div><dt>CRC32</dt><dd id="metaCrc">-</dd></div>
+              <div><dt>SHA-1</dt><dd id="metaSha">-</dd></div>
+            </dl>
+          </div>
+
+          <form id="downloadForm" class="download-form">
+            <label for="destination">EmuDeck ROMs root</label>
+            <div class="path-row">
+              <input id="destination" type="text" spellcheck="false" />
+              <button id="browseRootButton" type="button">Browse</button>
+              <button id="defaultDirButton" type="button">Default</button>
+            </div>
+            <label for="routeOverride">System subfolder</label>
+            <div class="path-row">
+              <input id="routeOverride" type="text" spellcheck="false" placeholder="Auto-detected after selection" />
+              <button id="browseSubfolderButton" type="button">Browse</button>
+              <button id="autoRouteButton" type="button">Auto</button>
+            </div>
+
+            <div class="toggles">
+              <label class="check-row">
+                <input id="extractToggle" type="checkbox" checked />
+                <span>Extract archives after download</span>
+              </label>
+              <label class="check-row">
+                <input id="rootFallbackToggle" type="checkbox" />
+                <span>Download on the main folder (not recommended using Emudeck)</span>
+              </label>
+              <label class="check-row">
+                <input id="legalConfirm" type="checkbox" />
+                <span>I have the right to download and use this file</span>
+              </label>
+            </div>
+
+            <button id="downloadButton" class="primary-button" type="submit" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" /></svg>
+              Download Selected
+            </button>
+          </form>
+
+          <section class="job-pane" aria-label="Download job">
+            <div class="pane-head">
+              <span id="jobStage">No active download</span>
+              <span id="jobPercent">-</span>
+            </div>
+            <div class="progress-track"><div id="progressBar"></div></div>
+            <div id="queueList" class="queue-list"></div>
+            <div id="outputs" class="outputs"></div>
+            <pre id="jobLog" class="job-log"></pre>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <div id="browseDialog" class="dialog-backdrop" hidden>
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="browseTitle">
+        <div class="dialog-head">
+          <h2 id="browseTitle">Browse</h2>
+          <button id="browseCloseButton" class="icon-button" type="button" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div id="browseCurrent" class="browse-current"></div>
+        <div id="browseList" class="browse-list"></div>
+        <div class="dialog-actions">
+          <button id="browseParentButton" type="button">Up</button>
+          <button id="browseSelectButton" class="primary-button" type="button">Select</button>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

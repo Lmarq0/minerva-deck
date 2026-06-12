@@ -1,0 +1,17 @@
+.ssh/
+__pycache__/
+*.py[cod]
+
+server.log
+server.err.log
+*.log
+
+chrome-controller-test*/
+chrome-screenshot-session*/
+screenshots/
+
+.env
+.env.*
+vendor/
+downloads/
+cache/
