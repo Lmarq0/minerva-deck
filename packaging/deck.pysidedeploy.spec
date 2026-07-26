@@ -8,7 +8,7 @@ icon = packaging/assets/minerva-deck.png
 
 [python]
 python_path =
-packages = nuitka==4.1.3,ordered-set==4.1.0,zstandard==0.23.0
+packages = nuitka==4.1.3,ordered-set==4.1.0,zstandard==0.25.0
 
 [qt]
 qml_files =

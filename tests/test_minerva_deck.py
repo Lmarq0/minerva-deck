@@ -1,9 +1,12 @@
+import configparser
 import gzip
 import json
 import tempfile
 import threading
 import time
+import tomllib
 import unittest
+import xml.etree.ElementTree as ElementTree
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -13,6 +16,7 @@ from urllib.request import Request, urlopen
 
 from minerva_app import (
     catalog,
+    config,
     desktop,
     downloader,
     jobs,
@@ -21,6 +25,50 @@ from minerva_app import (
     storage,
     torrents,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class ReleaseMetadataTest(unittest.TestCase):
+    def test_release_versions_are_consistent(self) -> None:
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))
+        version = project["project"]["version"]
+        self.assertEqual(config.APP_VERSION, version)
+
+        vcpkg = json.loads((ROOT / "packaging" / "vcpkg.json").read_text("utf-8"))
+        self.assertEqual(vcpkg["version-string"], version)
+
+        appdata = ElementTree.parse(
+            ROOT / "packaging" / "io.github.Lmarq0.minerva-deck.appdata.xml"
+        )
+        releases = appdata.getroot().find("releases")
+        self.assertIsNotNone(releases)
+        assert releases is not None
+        self.assertEqual(releases[0].attrib["version"], version)
+
+        windows_spec = configparser.ConfigParser()
+        windows_spec.read(
+            ROOT / "packaging" / "windows.pysidedeploy.spec",
+            encoding="utf-8",
+        )
+        extra_args = windows_spec["nuitka"]["extra_args"]
+        self.assertIn(f"--windows-file-version={version}.0", extra_args)
+        self.assertIn(f"--windows-product-version={version}.0", extra_args)
+
+    def test_build_dependency_pins_are_consistent(self) -> None:
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))
+        zstandard = next(
+            dependency
+            for dependency in project["project"]["optional-dependencies"]["build"]
+            if dependency.startswith("zstandard==")
+        )
+
+        for spec_name in ("windows.pysidedeploy.spec", "deck.pysidedeploy.spec"):
+            spec = configparser.ConfigParser()
+            spec.read(ROOT / "packaging" / spec_name, encoding="utf-8")
+            packages = spec["python"]["packages"].split(",")
+            self.assertIn(zstandard, packages)
 
 
 class CatalogHelpersTest(unittest.TestCase):
