@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Linux runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive13 libegl1 libgl1 libxkbcommon-x11-0
+      - name: Install Python dependencies
+        run: python -m pip install -e .
+      - name: Validate imports
+        shell: bash
+        run: |
+          python -c "import libtorrent, PySide6"
+          if [ "$RUNNER_OS" = "Linux" ]; then python -c "import libarchive"; fi
+      - name: Python tests
+        run: python -m unittest discover -s tests -v
+      - name: JavaScript syntax
+        run: node --check public/static/app.js
+      - name: Packaged entry self-test prerequisites
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python minerva_deck.py --self-test

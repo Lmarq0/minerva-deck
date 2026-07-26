@@ -1,0 +1,18 @@
+- module-name: 'minerva_app.storage'
+  dlls:
+    - by_code:
+        setup_code: |
+          import glob
+          import os
+        filename_code: |
+          glob.glob(os.path.join(os.getcwd(), "build", "native", "*.dll"))
+      dest_path: 'native'
+      when: 'win32'
+    - by_code:
+        setup_code: |
+          import glob
+          import os
+        filename_code: |
+          glob.glob(os.path.join(os.getcwd(), "build", "deck-native", "*.so*"))
+      dest_path: 'native'
+      when: 'linux'

@@ -1,0 +1,1 @@
+"""MiNERVA Deck application package."""

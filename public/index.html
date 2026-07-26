@@ -3,117 +3,270 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0d14" />
+    <meta name="minerva-session-token" content="__MINERVA_SESSION_TOKEN__" />
     <title>MiNERVA Deck</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <div>
-          <h1>MiNERVA Deck</h1>
-          <p id="subtitle">Selective torrent downloads for your own ROM library</p>
-        </div>
-        <div class="status-strip">
-          <span id="ariaStatus" class="pill muted">aria2c</span>
-          <span id="zipStatus" class="pill muted">7z</span>
+        <a class="brand" href="/" aria-label="MiNERVA Deck home">
+          <span class="brand-mark" aria-hidden="true">M</span>
+          <span>
+            <strong>MiNERVA</strong>
+            <small>DECK</small>
+          </span>
+        </a>
+
+        <div class="topbar-actions">
+          <div id="setupStatus" class="setup-status" role="status">
+            <span class="status-light" aria-hidden="true"></span>
+            <span id="setupStatusText">Checking setup…</span>
+          </div>
+          <button id="downloadsButton" class="quiet-button downloads-button" type="button" aria-label="Open downloads" aria-controls="downloadsDialog" aria-expanded="false">
+            <span>Downloads</span>
+            <span id="queueBadge" class="count-badge" hidden>0</span>
+          </button>
         </div>
       </header>
 
+      <section id="setupBanner" class="setup-banner" hidden>
+        <div class="setup-banner-icon" aria-hidden="true">!</div>
+        <div>
+          <strong>Runtime component unavailable</strong>
+          <p id="setupBannerText">Use an official build or install the project dependencies.</p>
+        </div>
+        <button id="dismissSetupButton" class="quiet-button" type="button">Dismiss</button>
+      </section>
+
       <section class="workspace">
-        <aside class="search-pane" aria-label="ROM search">
-          <div class="pane-head">
-            <label for="query">Search archive</label>
-            <span id="searchCount">Idle</span>
+        <aside class="library-pane" aria-labelledby="libraryTitle">
+          <div class="library-heading">
+            <div>
+              <p class="eyebrow">MiNERVA archive</p>
+              <h1 id="libraryTitle">Find a game</h1>
+            </div>
+            <span id="searchCount" class="result-count">Ready</span>
           </div>
-          <input id="query" class="search-input" type="search" autocomplete="off" placeholder="Game, platform, region" />
-          <div id="results" class="results" aria-live="polite"></div>
+
+          <label class="search-box" for="query">
+            <span class="search-symbol" aria-hidden="true"></span>
+            <span class="sr-only">Search games</span>
+            <input
+              id="query"
+              type="search"
+              aria-label="Search games"
+              autocomplete="off"
+              placeholder="Search title, platform, or region"
+            />
+            <kbd aria-hidden="true">Steam + X</kbd>
+          </label>
+
+          <div class="filter-bar" aria-label="Search filters">
+            <label class="filter-toggle">
+              <input id="gamesOnlyToggle" type="checkbox" checked />
+              <span>Games only</span>
+            </label>
+            <label class="format-filter">
+              <span class="sr-only">File format</span>
+              <select id="formatFilter">
+                <option value="">All formats</option>
+                <option value="archive">Archives</option>
+                <option value="disc">Disc images</option>
+                <option value="rom">ROM files</option>
+                <option value="package">Install packages</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="results" class="results" aria-live="polite" aria-busy="false"></div>
         </aside>
 
-        <section class="detail-pane" aria-label="Selected ROM">
-          <div class="selection">
-            <div class="pane-head">
-              <span>Selected ROM</span>
-              <button id="clearButton" class="icon-button" type="button" title="Clear selection" disabled>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
-              </button>
+        <section class="game-pane" aria-label="Selected game">
+          <div id="selectionEmpty" class="selection-empty">
+            <div class="empty-art" aria-hidden="true">
+              <span></span><span></span><span></span>
             </div>
-            <h2 id="selectedName">No ROM selected</h2>
-            <p id="selectedPath" class="path-line">Search and select one archive entry.</p>
-            <dl class="metadata">
-              <div><dt>Collection</dt><dd id="metaCollection">-</dd></div>
-              <div><dt>System</dt><dd id="metaSystem">-</dd></div>
-              <div><dt>EmuDeck Folder</dt><dd id="metaRoute">-</dd></div>
-              <div><dt>Size</dt><dd id="metaSize">-</dd></div>
-              <div><dt>CRC32</dt><dd id="metaCrc">-</dd></div>
-              <div><dt>SHA-1</dt><dd id="metaSha">-</dd></div>
-            </dl>
+            <p class="eyebrow">Your next game</p>
+            <h2>Choose something from the archive</h2>
+            <p>Search by title, platform, or region. We’ll find the right EmuDeck folder and prepare everything else.</p>
           </div>
 
-          <form id="downloadForm" class="download-form">
-            <label for="destination">EmuDeck ROMs root</label>
-            <div class="path-row">
-              <input id="destination" type="text" spellcheck="false" />
-              <button id="browseRootButton" type="button">Browse</button>
-              <button id="defaultDirButton" type="button">Default</button>
-            </div>
-            <label for="routeOverride">System subfolder</label>
-            <div class="path-row">
-              <input id="routeOverride" type="text" spellcheck="false" placeholder="Auto-detected after selection" />
-              <button id="browseSubfolderButton" type="button">Browse</button>
-              <button id="autoRouteButton" type="button">Auto</button>
+          <article id="selectionCard" class="selection-card" hidden>
+            <div class="selection-topline">
+              <span id="platformBadge" class="platform-badge">Unknown system</span>
+              <button id="clearButton" class="icon-button" type="button" aria-label="Clear selected game">×</button>
             </div>
 
-            <div class="toggles">
-              <label class="check-row">
-                <input id="extractToggle" type="checkbox" checked />
-                <span>Extract archives after download</span>
-              </label>
-              <label class="check-row">
-                <input id="rootFallbackToggle" type="checkbox" />
-                <span>Download on the main folder (not recommended using Emudeck)</span>
-              </label>
-              <label class="check-row">
-                <input id="legalConfirm" type="checkbox" />
-                <span>I have the right to download and use this file</span>
-              </label>
+            <div class="game-identity">
+              <p id="selectedCollection" class="collection-name">Collection</p>
+              <h2 id="selectedName">Selected game</h2>
+              <p id="selectedPath" class="source-path"></p>
+              <div class="game-facts" aria-label="Game details">
+                <span id="regionFact" hidden>Unknown region</span>
+                <span id="formatFact">File</span>
+                <span id="sizeFact">Size pending</span>
+              </div>
             </div>
 
-            <button id="downloadButton" class="primary-button" type="submit" disabled>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" /></svg>
-              Download Selected
+            <section class="destination-card" aria-labelledby="destinationTitle">
+              <div class="destination-icon" aria-hidden="true">↳</div>
+              <div>
+                <p class="eyebrow" id="destinationTitle">Add to</p>
+                <strong id="destinationSummary">Detecting EmuDeck folder…</strong>
+                <span id="destinationHint">We’ll route this automatically.</span>
+              </div>
+              <span id="routeStatus" class="route-status">Auto</span>
+            </section>
+
+            <details id="advancedOptions" class="advanced-options">
+              <summary>
+                <span>Advanced options</span>
+                <small>Destination, extraction, and fallback</small>
+              </summary>
+
+              <div class="advanced-content">
+                <label class="field-label" for="destination">EmuDeck ROMs root</label>
+                <div class="path-row">
+                  <input id="destination" type="text" spellcheck="false" />
+                  <button id="browseRootButton" class="quiet-button" type="button">Browse</button>
+                  <button id="defaultDirButton" class="quiet-button" type="button">Reset</button>
+                </div>
+
+                <label class="field-label" for="routeOverride">System subfolder</label>
+                <div class="path-row">
+                  <input id="routeOverride" type="text" spellcheck="false" placeholder="Automatically detected" />
+                  <button id="browseSubfolderButton" class="quiet-button" type="button">Browse</button>
+                  <button id="autoRouteButton" class="quiet-button" type="button">Auto</button>
+                </div>
+
+                <label class="option-row">
+                  <input id="extractToggle" type="checkbox" checked />
+                  <span>
+                    <strong>Extract archives automatically</strong>
+                    <small>Ready-to-play files are placed in the detected system folder.</small>
+                  </span>
+                </label>
+
+                <label class="option-row fallback-option">
+                  <input id="rootFallbackToggle" type="checkbox" />
+                  <span>
+                    <strong>Use the ROMs root as a fallback</strong>
+                    <small>Download on the main folder (not recommended using Emudeck)</small>
+                  </span>
+                </label>
+              </div>
+            </details>
+
+            <label class="legal-confirm">
+              <input id="legalConfirm" type="checkbox" />
+              <span>I confirm that I have the right to download and use this file.</span>
+            </label>
+
+            <button id="downloadButton" class="primary-button" type="button" disabled>
+              <span id="downloadButtonLabel">Add to EmuDeck</span>
+              <span aria-hidden="true">→</span>
             </button>
-          </form>
-
-          <section class="job-pane" aria-label="Download job">
-            <div class="pane-head">
-              <span id="jobStage">No active download</span>
-              <span id="jobPercent">-</span>
-            </div>
-            <div class="progress-track"><div id="progressBar"></div></div>
-            <div id="queueList" class="queue-list"></div>
-            <div id="outputs" class="outputs"></div>
-            <pre id="jobLog" class="job-log"></pre>
-          </section>
+            <p id="downloadHelp" class="download-help">Select a game to continue.</p>
+          </article>
         </section>
+      </section>
+
+      <section id="activityDock" class="activity-dock" aria-label="Download activity">
+        <button id="activitySummary" class="activity-summary" type="button" aria-expanded="false">
+          <span id="activityIcon" class="activity-icon" aria-hidden="true">↓</span>
+          <span class="activity-copy">
+            <strong id="jobStage">Ready when you are</strong>
+            <small id="activityDetail">Downloads and completed files will appear here.</small>
+          </span>
+          <span id="jobPercent" class="job-percent">—</span>
+          <span class="dock-chevron" aria-hidden="true">⌃</span>
+        </button>
+        <div id="progressTrack" class="progress-track" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="progressBar"></div>
+        </div>
+        <div id="activityDrawer" class="activity-drawer" hidden>
+          <div id="queueList" class="queue-list"></div>
+          <div id="outputs" class="outputs"></div>
+          <details class="log-details">
+            <summary>Technical log</summary>
+            <pre id="jobLog" class="job-log"></pre>
+          </details>
+        </div>
       </section>
     </main>
 
-    <div id="browseDialog" class="dialog-backdrop" hidden>
-      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="browseTitle">
-        <div class="dialog-head">
+    <section
+      id="downloadsDialog"
+      class="downloads-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="downloadsTitle"
+      hidden
+    >
+      <div class="downloads-dialog">
+        <div class="downloads-head">
+          <div>
+            <p class="eyebrow">Transfer center</p>
+            <h2 id="downloadsTitle">Downloads</h2>
+            <p class="downloads-subtitle">Current activity and the last 100 downloads on this device.</p>
+          </div>
+          <button id="downloadsCloseButton" class="icon-button" type="button" aria-label="Close downloads">×</button>
+        </div>
+
+        <div class="download-stats" aria-label="Download summary">
+          <div>
+            <span id="downloadsActiveCount">0</span>
+            <small>Active</small>
+          </div>
+          <div>
+            <span id="downloadsCompletedCount">0</span>
+            <small>Completed</small>
+          </div>
+          <div>
+            <span id="downloadsIssueCount">0</span>
+            <small>Needs attention</small>
+          </div>
+        </div>
+
+        <div class="downloads-toolbar">
+          <div class="download-filters" role="tablist" aria-label="Filter downloads">
+            <button class="download-filter active" type="button" role="tab" data-download-filter="all" aria-selected="true">All</button>
+            <button class="download-filter" type="button" role="tab" data-download-filter="active" aria-selected="false">Active</button>
+            <button class="download-filter" type="button" role="tab" data-download-filter="done" aria-selected="false">Completed</button>
+            <button class="download-filter" type="button" role="tab" data-download-filter="issues" aria-selected="false">Issues</button>
+          </div>
+          <button id="downloadsRefreshButton" class="quiet-button" type="button">Refresh</button>
+        </div>
+
+        <div class="downloads-layout">
+          <div id="downloadsList" class="download-history-list" aria-live="polite"></div>
+          <article id="downloadsDetail" class="download-detail" aria-live="polite">
+            <div class="download-detail-empty">
+              <strong>No download selected</strong>
+              <span>Choose an item to see its destination, progress, warnings, and technical log.</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <dialog id="browseDialog" class="dialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Choose a folder</p>
           <h2 id="browseTitle">Browse</h2>
-          <button id="browseCloseButton" class="icon-button" type="button" title="Close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
         </div>
-        <div id="browseCurrent" class="browse-current"></div>
-        <div id="browseList" class="browse-list"></div>
-        <div class="dialog-actions">
-          <button id="browseParentButton" type="button">Up</button>
-          <button id="browseSelectButton" class="primary-button" type="button">Select</button>
-        </div>
-      </section>
-    </div>
+        <button id="browseCloseButton" class="icon-button" type="button" aria-label="Close folder browser">×</button>
+      </div>
+      <div id="browseCurrent" class="browse-current"></div>
+      <div id="browseList" class="browse-list"></div>
+      <div class="dialog-actions">
+        <button id="browseParentButton" class="quiet-button" type="button">Up one level</button>
+        <button id="browseSelectButton" class="primary-button" type="button">Use this folder</button>
+      </div>
+    </dialog>
 
     <script type="module" src="/static/app.js"></script>
   </body>

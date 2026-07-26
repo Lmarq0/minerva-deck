@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=MiNERVA Deck
-Comment=Selective MiNERVA torrent downloader
-Exec=bash -lc 'cd "$(dirname "%k")" && chmod +x ./run-linux.sh && ./run-linux.sh'
-Terminal=true
-Categories=Utility;

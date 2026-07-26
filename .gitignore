@@ -15,3 +15,13 @@ screenshots/
 vendor/
 downloads/
 cache/
+
+aria2c
+aria2c.exe
+aria2/
+
+.venv*/
+*.egg-info/
+build/
+dist/
+packaging/native/

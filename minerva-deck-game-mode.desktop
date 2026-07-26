@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=MiNERVA Deck Game Mode
-Comment=Launch MiNERVA Deck in a fullscreen browser
-Exec=bash -lc 'cd "$(dirname "%k")" && chmod +x ./run-game-mode.sh && ./run-game-mode.sh'
-Terminal=true
-Categories=Game;Utility;

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -e
+APPDIR="$(dirname "$(readlink -f "$0")")"
+export LD_LIBRARY_PATH="$APPDIR/usr/bin/native:$APPDIR/usr/bin:${LD_LIBRARY_PATH:-}"
+exec "$APPDIR/usr/bin/minerva-deck" "$@"
