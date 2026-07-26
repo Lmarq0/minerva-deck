@@ -65,7 +65,7 @@ jobs:
     needs: [windows, deck]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           path: release
           merge-multiple: true
