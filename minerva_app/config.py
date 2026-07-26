@@ -9,7 +9,7 @@ from .resources import public_root
 
 
 APP_NAME = "MiNERVA Deck"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 PUBLIC_ROOT = public_root()
 MINERVA_BASE = "https://minerva-archive.org"
 MINERVA_CDN = "https://cdn.minerva-archive.org"

@@ -1,3 +1,5 @@
+import { ControllerInput } from "./controller.js";
+
 const state = {
   status: null,
   selected: null,
@@ -15,8 +17,6 @@ const state = {
   selectionRequest: 0,
   searchAbort: null,
   selectionAbort: null,
-  gamepadButtons: new Map(),
-  gamepadRepeat: { key: null, at: 0 },
   browse: { mode: null, current: "", parent: null, previousFocus: null },
 };
 
@@ -1107,6 +1107,16 @@ function isInDirection(direction, dx, dy) {
 }
 
 function startGamepadNavigation() {
+  if (startGamepadNavigation.started) return;
+  startGamepadNavigation.started = true;
+  window.addEventListener("gamepaddisconnected", (event) => {
+    controllerInput.disconnect(event.gamepad.index);
+  });
+  window.addEventListener("blur", () => controllerInput.reset());
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) controllerInput.reset();
+  });
+
   const tick = () => {
     pollGamepads();
     requestAnimationFrame(tick);
@@ -1116,54 +1126,25 @@ function startGamepadNavigation() {
 
 function pollGamepads() {
   const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
-  if (!pads.length) return;
-  const pad = pads[0];
-  const direction =
-    pressed(pad, 12) || axisPressed(pad, 1, -1) ? "up" :
-    pressed(pad, 13) || axisPressed(pad, 1, 1) ? "down" :
-    pressed(pad, 14) || axisPressed(pad, 0, -1) ? "left" :
-    pressed(pad, 15) || axisPressed(pad, 0, 1) ? "right" :
-    null;
-
-  if (direction && shouldRepeat(direction)) moveControllerFocus(direction);
-  if (!direction) state.gamepadRepeat = { key: null, at: 0 };
-
-  if (buttonPressedOnce(pad, 0, "a")) {
-    ensureControllerFocus();
-    document.activeElement?.click();
-  }
-  if (buttonPressedOnce(pad, 1, "b")) {
-    if (!elements.downloadsDialog.hidden) closeDownloads();
-    else if (elements.browseDialog.open) closeBrowser();
-    else if (elements.advancedOptions.open) elements.advancedOptions.open = false;
-    else elements.query.focus({ preventScroll: true });
-  }
+  controllerInput.poll(pads);
 }
 
-function pressed(pad, index) {
-  return Boolean(pad.buttons[index]?.pressed);
+function acceptControllerAction() {
+  ensureControllerFocus();
+  document.activeElement?.click();
 }
 
-function axisPressed(pad, index, sign) {
-  const value = pad.axes[index] || 0;
-  return sign < 0 ? value < -0.55 : value > 0.55;
+function cancelControllerAction() {
+  if (!elements.downloadsDialog.hidden) closeDownloads();
+  else if (elements.browseDialog.open) closeBrowser();
+  else if (elements.advancedOptions.open) elements.advancedOptions.open = false;
+  else elements.query.focus({ preventScroll: true });
 }
 
-function shouldRepeat(key) {
-  const now = performance.now();
-  const delay = state.gamepadRepeat.key === key ? 130 : 260;
-  if (state.gamepadRepeat.key !== key || now - state.gamepadRepeat.at >= delay) {
-    state.gamepadRepeat = { key, at: now };
-    return true;
-  }
-  return false;
-}
-
-function buttonPressedOnce(pad, index, key) {
-  const isPressed = pressed(pad, index);
-  const wasPressed = state.gamepadButtons.get(key) || false;
-  state.gamepadButtons.set(key, isPressed);
-  return isPressed && !wasPressed;
-}
+const controllerInput = new ControllerInput({
+  onDirection: moveControllerFocus,
+  onAccept: acceptControllerAction,
+  onCancel: cancelControllerAction,
+});
 
 init();

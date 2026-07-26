@@ -56,7 +56,9 @@ Assert-NativeCommand "license collection"
 & $buildPython -m unittest discover -s tests -v
 Assert-NativeCommand "test suite"
 node --check public\static\app.js
-Assert-NativeCommand "JavaScript syntax check"
+node --check public\static\controller.js
+node --test tests\controller_navigation.test.mjs
+Assert-NativeCommand "JavaScript test suite"
 
 $includeLicenses = "--include-data-dir=$licenses=licenses"
 & $buildPython -m nuitka `

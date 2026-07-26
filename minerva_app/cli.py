@@ -30,7 +30,8 @@ def run_server(host: str, port: int) -> int:
 def run_self_test() -> int:
     checks = {
         "frontend": (PUBLIC_ROOT / "index.html").is_file()
-        and (PUBLIC_ROOT / "static" / "app.js").is_file(),
+        and (PUBLIC_ROOT / "static" / "app.js").is_file()
+        and (PUBLIC_ROOT / "static" / "controller.js").is_file(),
         "torrentDownload": torrent_engine_status()["ready"],
         "archiveExtraction": archive_engine_status()["ready"],
     }

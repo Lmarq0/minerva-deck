@@ -28,7 +28,7 @@ Download the `.exe` and open it. It is portable and does not need an installer.
 Initial releases are unsigned, so Windows SmartScreen may display a warning. Verify the SHA-256 checksum before running a downloaded build:
 
 ```powershell
-Get-FileHash .\MiNERVA-Deck-1.0.1-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\MiNERVA-Deck-1.0.2-windows-x64.exe -Algorithm SHA256
 ```
 
 ### Steam Deck
@@ -36,8 +36,8 @@ Get-FileHash .\MiNERVA-Deck-1.0.1-windows-x64.exe -Algorithm SHA256
 Switch to Desktop Mode, download the AppImage, make it executable, and open it:
 
 ```bash
-chmod +x MiNERVA-Deck-1.0.1-steamdeck-x86_64.AppImage
-./MiNERVA-Deck-1.0.1-steamdeck-x86_64.AppImage
+chmod +x MiNERVA-Deck-1.0.2-steamdeck-x86_64.AppImage
+./MiNERVA-Deck-1.0.2-steamdeck-x86_64.AppImage
 ```
 
 The release targets Steam Deck Desktop Mode. There is no separate gaming-session launcher.
@@ -57,7 +57,7 @@ sha256sum -c SHA256SUMS.txt
 - Preserves the last 100 completed, failed, and cancelled download records across restarts.
 - Extracts ZIP, TAR variants, 7z, RAR, and RAR5 archives when possible.
 - Routes recognized systems to EmuDeck folders on internal storage or an SD card.
-- Preserves keyboard and controller navigation.
+- Preserves keyboard and standard-controller navigation while ignoring raw wheel and pedal mappings.
 - Remembers window geometry and the selected destination.
 - Prevents a second launch from starting another backend; it focuses the existing window instead.
 
@@ -201,7 +201,9 @@ Run the complete source suite:
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 node --check public\static\app.js
-.\.venv\Scripts\python.exe -m minerva_app --self-test
+node --check public\static\controller.js
+node --test tests\controller_navigation.test.mjs
+.\.venv\Scripts\python.exe minerva_deck.py --self-test
 ```
 
 On Linux, use `./.venv/bin/python` and `/` path separators.

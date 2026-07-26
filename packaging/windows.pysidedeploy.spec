@@ -18,4 +18,4 @@ plugins =
 
 [nuitka]
 mode = onefile
-extra_args = --quiet --enable-plugin=pyside6 --windows-console-mode=disable --windows-product-name="MiNERVA Deck" --windows-file-description="MiNERVA Deck desktop application" --windows-company-name=MiNERVA --windows-file-version=1.0.1.0 --windows-product-version=1.0.1.0 --include-data-dir=public=public --include-data-dir=packaging=packaging --include-data-dir=build/native=native --include-data-dir=build/licenses=licenses
+extra_args = --quiet --enable-plugin=pyside6 --windows-console-mode=disable --windows-product-name="MiNERVA Deck" --windows-file-description="MiNERVA Deck desktop application" --windows-company-name=MiNERVA --windows-file-version=1.0.2.0 --windows-product-version=1.0.2.0 --include-data-dir=public=public --include-data-dir=packaging=packaging --include-data-dir=build/native=native --include-data-dir=build/licenses=licenses
