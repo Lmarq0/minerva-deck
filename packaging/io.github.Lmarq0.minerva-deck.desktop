@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=MiNERVA Deck
+Comment=Search and selectively download from MiNERVA
+Exec=minerva-deck
+Icon=minerva-deck
+Terminal=false
+Categories=Game;Emulator;

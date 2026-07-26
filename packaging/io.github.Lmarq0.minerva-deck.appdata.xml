@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.Lmarq0.minerva-deck</id>
+  <name>MiNERVA Deck</name>
+  <summary>Search and selectively download games from MiNERVA</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <launchable type="desktop-id">io.github.Lmarq0.minerva-deck.desktop</launchable>
+  <description>
+    <p>
+      MiNERVA Deck provides a controller-friendly desktop interface for
+      searching the MiNERVA catalog, selecting individual torrent files, and
+      routing completed downloads to local or EmuDeck destinations.
+    </p>
+  </description>
+  <releases>
+    <release version="1.0.0" date="2026-07-25"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>
