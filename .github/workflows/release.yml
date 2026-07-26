@@ -13,7 +13,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -24,7 +24,7 @@ jobs:
       - name: Build portable EXE
         shell: powershell
         run: .\build-windows.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-x64
           path: dist/*.exe
@@ -33,7 +33,7 @@ jobs:
   deck:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -54,7 +54,7 @@ jobs:
         run: |
           chmod +x build-deck.sh packaging/AppRun
           ./build-deck.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: steamdeck-x86_64
           path: dist/*.AppImage
@@ -65,7 +65,7 @@ jobs:
     needs: [windows, deck]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           path: release
           merge-multiple: true
@@ -78,6 +78,7 @@ jobs:
         run: >-
           gh release create "${GITHUB_REF_NAME}" release/*
           --repo "${GITHUB_REPOSITORY}"
+          --title "MiNERVA Deck ${GITHUB_REF_NAME#v}"
           --generate-notes
 
       # Code signing is intentionally deferred. Add a signing job before

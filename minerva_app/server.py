@@ -35,7 +35,7 @@ from .utils import json_bytes, quote_path_for_url
 
 
 class AppHandler(BaseHTTPRequestHandler):
-    server_version = "MinervaDeck/1.0"
+    server_version = f"MinervaDeck/{APP_VERSION}"
     session_token = ""
     desktop_runtime = False
 

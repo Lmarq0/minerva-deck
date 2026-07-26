@@ -28,7 +28,7 @@ Download the `.exe` and open it. It is portable and does not need an installer.
 Initial releases are unsigned, so Windows SmartScreen may display a warning. Verify the SHA-256 checksum before running a downloaded build:
 
 ```powershell
-Get-FileHash .\MiNERVA-Deck-1.0.0-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\MiNERVA-Deck-1.0.1-windows-x64.exe -Algorithm SHA256
 ```
 
 ### Steam Deck
@@ -36,8 +36,8 @@ Get-FileHash .\MiNERVA-Deck-1.0.0-windows-x64.exe -Algorithm SHA256
 Switch to Desktop Mode, download the AppImage, make it executable, and open it:
 
 ```bash
-chmod +x MiNERVA-Deck-1.0.0-steamdeck-x86_64.AppImage
-./MiNERVA-Deck-1.0.0-steamdeck-x86_64.AppImage
+chmod +x MiNERVA-Deck-1.0.1-steamdeck-x86_64.AppImage
+./MiNERVA-Deck-1.0.1-steamdeck-x86_64.AppImage
 ```
 
 The release targets Steam Deck Desktop Mode. There is no separate gaming-session launcher.

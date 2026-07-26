@@ -9,11 +9,11 @@ from .resources import public_root
 
 
 APP_NAME = "MiNERVA Deck"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 PUBLIC_ROOT = public_root()
 MINERVA_BASE = "https://minerva-archive.org"
 MINERVA_CDN = "https://cdn.minerva-archive.org"
-USER_AGENT = "MiNERVA-Deck/1.0 (+local selective torrent helper)"
+USER_AGENT = f"MiNERVA-Deck/{APP_VERSION} (+local selective torrent helper)"
 DEFAULT_PORT = 8765
 MAX_SEARCH_RESULTS = 48
 CATALOG_SCHEMA_VERSION = 6
