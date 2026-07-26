@@ -24,7 +24,7 @@ jobs:
       - name: Build portable EXE
         shell: powershell
         run: .\build-windows.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-x64
           path: dist/*.exe
@@ -54,7 +54,7 @@ jobs:
         run: |
           chmod +x build-deck.sh packaging/AppRun
           ./build-deck.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: steamdeck-x86_64
           path: dist/*.AppImage
