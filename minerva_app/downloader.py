@@ -13,7 +13,7 @@ from .utils import normalize_minerva_path
 
 
 STALL_TIMEOUT_SECONDS = 10 * 60
-POLL_INTERVAL_SECONDS = 0.5
+POLL_INTERVAL_SECONDS = 1.0
 FATAL_ALERTS = {
     "file_error_alert",
     "metadata_failed_alert",
@@ -156,13 +156,20 @@ def download_selected(
             if fatal:
                 raise RuntimeError(fatal)
 
-            progress_values = handle.file_progress()
-            downloaded = (
-                min(int(progress_values[selection.file.index]), selection.file.length)
-                if len(progress_values) > selection.file.index
-                else 0
-            )
+            # Only one file is wanted, so the wanted-bytes counters track it.
+            # file_progress() builds a list for every file in the torrent
+            # (thousands for large sets), so it is only used to confirm.
             status = handle.status()
+            downloaded = min(int(status.total_wanted_done), selection.file.length)
+            if status.total_wanted > 0 and status.total_wanted_done >= status.total_wanted:
+                progress_values = handle.file_progress()
+                if len(progress_values) > selection.file.index:
+                    downloaded = min(
+                        int(progress_values[selection.file.index]),
+                        selection.file.length,
+                    )
+            elif 0 < selection.file.length <= downloaded:
+                downloaded = selection.file.length - 1
             progress_callback(
                 DownloadProgress(
                     downloaded_bytes=downloaded,

@@ -107,6 +107,15 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+// Polling re-renders the same markup every second during a download; skipping
+// identical writes avoids needless layout and paint work in WebEngine.
+const renderedHtml = new WeakMap();
+function setHtml(element, html) {
+  if (renderedHtml.get(element) === html) return;
+  renderedHtml.set(element, html);
+  element.innerHTML = html;
+}
+
 function normalizePath(path) {
   return String(path || "")
     .replaceAll("\\", "/")
@@ -270,7 +279,7 @@ async function loadStatus() {
   updateDownloadButton();
 }
 
-function scheduleSearch(delay = 400) {
+function scheduleSearch(delay = 600) {
   clearTimeout(state.searchTimer);
   clearTimeout(state.searchPollTimer);
   state.searchPollTimer = null;
@@ -301,7 +310,7 @@ async function search(query, { polling = false } = {}) {
   setResultsBusy(true);
   elements.searchCount.textContent = polling ? "Preparing…" : "Searching…";
   if (!polling) {
-    showEmptyResults("Looking through MiNERVA", "This should only take a moment.");
+    showEmptyResults("Looking through MiNERVA", "MiNERVA's search server can take up to a minute to answer. Repeat searches are instant.");
   }
 
   const params = new URLSearchParams({
@@ -624,7 +633,7 @@ async function pollQueue() {
     const jobs = payload.jobs || [];
     state.jobs = jobs;
     setQueueUi(jobs);
-    setDownloadsUi(jobs);
+    if (!elements.downloadsDialog.hidden) setDownloadsUi(jobs);
     const active =
       jobs.find((job) => job.status === "running") ||
       jobs.find((job) => job.id === state.activeJobId) ||
@@ -633,7 +642,7 @@ async function pollQueue() {
     else setIdleJobUi();
 
     if (jobs.some((job) => job.status === "queued" || job.status === "running")) {
-      state.pollTimer = setTimeout(pollQueue, 1000);
+      state.pollTimer = setTimeout(pollQueue, document.hidden ? 5000 : 1000);
     }
   } catch (error) {
     setJobUi({ status: "error", stage: "Download service unavailable", error: error.message, log: [error.message] });
@@ -656,17 +665,17 @@ function setQueueUi(jobs) {
   elements.queueBadge.hidden = activeCount === 0;
   elements.queueBadge.textContent = String(activeCount);
   if (!jobs.length) {
-    elements.queueList.innerHTML = `<div class="empty-note"><span>No download history yet.</span></div>`;
+    setHtml(elements.queueList, `<div class="empty-note"><span>No download history yet.</span></div>`);
     return;
   }
-  elements.queueList.innerHTML = jobs.slice(-8).reverse().map((job) => {
+  setHtml(elements.queueList, jobs.slice(-8).reverse().map((job) => {
     const name = jobName(job);
     const progress = Number.isFinite(job.progress) ? ` ${job.progress}%` : "";
     return `<button class="queue-item ${escapeHtml(job.status)}" type="button" data-download-job="${escapeHtml(job.id)}">
       <span>${escapeHtml(name)}</span>
       <strong>${escapeHtml(jobStatusLabel(job.status))}${escapeHtml(progress)}</strong>
     </button>`;
-  }).join("");
+  }).join(""));
 }
 
 function setDownloadsUi(jobs) {
@@ -692,14 +701,14 @@ function setDownloadsUi(jobs) {
       jobs.length && state.downloadsFilter !== "all"
         ? "No downloads match this filter."
         : "Your downloads will appear here and remain available after restarting MiNERVA Deck.";
-    elements.downloadsList.innerHTML = `
+    setHtml(elements.downloadsList, `
       <div class="empty-note">
         <strong>No download history yet</strong>
         <span>${escapeHtml(message)}</span>
       </div>
-    `;
+    `);
   } else {
-    elements.downloadsList.innerHTML = filteredJobs.map((job) => {
+    setHtml(elements.downloadsList, filteredJobs.map((job) => {
       const progress = Number.isFinite(job.progress)
         ? Math.max(0, Math.min(100, Number(job.progress)))
         : 0;
@@ -723,19 +732,19 @@ function setDownloadsUi(jobs) {
           </span>
         </button>
       `;
-    }).join("");
+    }).join(""));
   }
   renderDownloadDetail(jobs.find((job) => job.id === state.selectedJobId));
 }
 
 function renderDownloadDetail(job) {
   if (!job) {
-    elements.downloadsDetail.innerHTML = `
+    setHtml(elements.downloadsDetail, `
       <div class="download-detail-empty">
         <strong>No download selected</strong>
         <span>Choose an item to see its destination, progress, warnings, and technical log.</span>
       </div>
-    `;
+    `);
     return;
   }
 
@@ -759,7 +768,7 @@ function renderDownloadDetail(job) {
     : warnings;
   const log = (job.log || []).join("\n");
 
-  elements.downloadsDetail.innerHTML = `
+  setHtml(elements.downloadsDetail, `
     <div class="download-detail-head">
       <div>
         <h3>${escapeHtml(jobName(job))}</h3>
@@ -790,7 +799,7 @@ function renderDownloadDetail(job) {
       <h4>Technical log</h4>
       <pre class="job-log">${escapeHtml(log || "No technical log entries.")}</pre>
     </section>
-  `;
+  `);
 }
 
 function setDownloadsFilter(filter) {
@@ -852,14 +861,18 @@ function setJobUi(job) {
   elements.jobPercent.textContent = Number.isFinite(job.progress) ? `${progress}%` : "—";
   elements.progressBar.style.width = `${progress}%`;
   elements.progressTrack.setAttribute("aria-valuenow", String(progress));
-  elements.outputs.innerHTML = (job.outputs || []).map((item) => `<div>Saved to ${escapeHtml(item)}</div>`).join("");
-  if (job.warnings?.length) {
-    elements.outputs.innerHTML += job.warnings
-      .map((warning) => `<div class="output-warning">${escapeHtml(warning)}</div>`)
-      .join("");
+  setHtml(
+    elements.outputs,
+    (job.outputs || []).map((item) => `<div>Saved to ${escapeHtml(item)}</div>`).join("")
+      + (job.warnings || [])
+        .map((warning) => `<div class="output-warning">${escapeHtml(warning)}</div>`)
+        .join(""),
+  );
+  const jobLog = (job.log || []).join("\n");
+  if (elements.jobLog.textContent !== jobLog) {
+    elements.jobLog.textContent = jobLog;
+    elements.jobLog.scrollTop = elements.jobLog.scrollHeight;
   }
-  elements.jobLog.textContent = (job.log || []).join("\n");
-  elements.jobLog.scrollTop = elements.jobLog.scrollHeight;
 
   elements.activityIcon.className = "activity-icon";
   if (job.status === "done") {
@@ -1129,8 +1142,13 @@ function startGamepadNavigation() {
   window.addEventListener("blur", () => poller.stop());
   window.addEventListener("focus", () => poller.start());
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) poller.stop();
-    else poller.start();
+    if (document.hidden) {
+      poller.stop();
+    } else {
+      poller.start();
+      // Downloads poll slowly while hidden; refresh at once when shown again.
+      if (state.pollTimer) pollQueue();
+    }
   });
   poller.start();
 }
