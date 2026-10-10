@@ -13,7 +13,7 @@ from typing import Any, List, Optional, Tuple
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
-from .config import CACHE_DIR, MINERVA_BASE, MINERVA_CDN, TORRENT_LIST_URL, USER_AGENT
+from .config import CACHE_DIR, MINERVA_BASE, TORRENT_LIST_URL, USER_AGENT
 from .utils import (
     fetch_bytes,
     format_bytes,
@@ -127,9 +127,7 @@ def candidate_torrent_urls(torrent_hint: str, rom_path: str) -> List[str]:
             cleaned = cleaned[7:] if cleaned.startswith("assets/") else cleaned
             basename = posixpath.basename(cleaned)
             if basename.endswith(".torrent"):
-                urls.append(f"{MINERVA_CDN}/torrents/{quote(basename)}")
-                if cleaned.startswith("torrents/"):
-                    urls.append(f"{MINERVA_CDN}/{quote_path_for_url(cleaned)}")
+                urls.append(f"{TORRENT_LIST_URL}{quote(basename)}")
                 urls.append(f"{MINERVA_BASE}/assets/{quote_path_for_url(cleaned)}")
 
     normalized = normalize_minerva_path(rom_path)
@@ -138,7 +136,7 @@ def candidate_torrent_urls(torrent_hint: str, rom_path: str) -> List[str]:
         for depth in range(min(len(parts) - 1, 8), 0, -1):
             label = " - ".join(parts[:depth])
             filename = f"Minerva_Myrient - {label}.torrent"
-            urls.append(f"{MINERVA_CDN}/torrents/{quote(filename)}")
+            urls.append(f"{TORRENT_LIST_URL}{quote(filename)}")
     return list(dict.fromkeys(urls))
 
 
@@ -171,7 +169,7 @@ def fallback_torrent_urls(rom_path: str) -> List[str]:
             if all(part in lowered for part in parts[:2]) or (
                 parts[0] in lowered and normalized.split("/")[0] in lowered
             ):
-                urls.append(f"{MINERVA_CDN}/torrents/{quote(filename)}")
+                urls.append(f"{TORRENT_LIST_URL}{quote(filename)}")
     except Exception:
         return []
     return urls

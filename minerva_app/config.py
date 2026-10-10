@@ -9,7 +9,7 @@ from .resources import public_root
 
 
 APP_NAME = "MiNERVA Deck"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 PUBLIC_ROOT = public_root()
 MINERVA_BASE = "https://minerva-archive.org"
 MINERVA_CDN = "https://cdn.minerva-archive.org"
@@ -19,7 +19,7 @@ MAX_SEARCH_RESULTS = 48
 CATALOG_SCHEMA_VERSION = 6
 SEARCH_API_URL = f"{MINERVA_BASE}/v1/api/rom/search"
 SEARCH_INDEX_URL = f"{MINERVA_BASE}/assets/index.txt.gz"
-TORRENT_LIST_URL = f"{MINERVA_CDN}/torrents/"
+TORRENT_LIST_URL = f"{MINERVA_CDN}/"
 ARCHIVE_EXTENSIONS = (
     ".zip",
     ".7z",

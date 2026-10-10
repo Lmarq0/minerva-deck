@@ -48,6 +48,7 @@ AUXILIARY_PATH_MARKERS = (
     "/all_non-zipped_content/", "/themes/", "/soundtrack/", "/boxart/", "/box art/",
     "/audio cd/", "/audio cd -", "/nintendo - nintendo music (",
     "/spc music/", "/vgm music/", "/nsf music/", "/sid music/", "/psf music/",
+    "/tosec-pix/", "/game guides/",
 )
 
 
@@ -122,6 +123,34 @@ def useful_catalog_section(value: str) -> bool:
         or normalized.startswith("mirror ")
         or normalized in {"extras", "support files", "miscellaneous", "roms", "files"}
     )
+
+
+REMOTE_SEARCH_TIMEOUT_SECONDS = 90
+REMOTE_CACHE_SECONDS = 15 * 60
+PREFERRED_COLLECTIONS = ("no-intro", "redump", "retroachievements")
+
+
+def remote_rank(result: Dict[str, Any], query: str) -> Tuple[int, int, int, int]:
+    """Order API results like the local catalog: exact titles and curated sets first."""
+    normalized_query = normalized_match_text(query)
+    title = normalized_match_text(re.sub(r"\.[^.]+$", "", result["fileName"]))
+    # Compare the name before "(USA)", "[h]", and similar dump tags.
+    base_title = normalized_match_text(re.split(r"[(\[]", result["fileName"], 1)[0])
+    collection = result["collection"].lower()
+    if base_title == normalized_query:
+        title_rank = 0
+    elif title.startswith(normalized_query):
+        title_rank = 1
+    elif all(token in title.split() for token in normalized_query.split()):
+        title_rank = 2
+    else:
+        title_rank = 3
+    collection_rank = (
+        PREFERRED_COLLECTIONS.index(collection)
+        if collection in PREFERRED_COLLECTIONS
+        else len(PREFERRED_COLLECTIONS)
+    )
+    return (title_rank, collection_rank, 0 if result["route"] else 1, len(title))
 
 
 class SearchIndex:
@@ -377,35 +406,38 @@ class SearchIndex:
         with self._lock:
             self._remote_request += 1
             request_id = self._remote_request
-        # Serialize requests and reuse identical queries when filters change.
-        # Bound both memory use and cache lifetime; failed requests are not cached.
+        # MiNERVA's search API often takes 15-50 seconds. Requests are not
+        # serialized, so a slow superseded query never delays the newest one.
+        # Successful responses are cached briefly; failures are not cached.
         with self._remote_lock:
-            # Discard superseded requests waiting behind an in-flight search.
-            with self._lock:
-                if request_id != self._remote_request:
-                    raise RuntimeError("Search superseded by a newer query")
             cached = self._remote_cache.get(query)
-            if cached and time.monotonic() - cached[0] < 60:
-                entries = cached[1]
+            if cached and time.monotonic() - cached[0] < REMOTE_CACHE_SECONDS:
                 self._remote_cache.move_to_end(query)
+                entries = cached[1]
             else:
-                request = Request(
-                    SEARCH_API_URL + "?" + urlencode({"query": query}),
-                    headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
-                )
-                try:
-                    with urlopen(request, timeout=20) as response:
-                        entries = json.load(response)
-                    if not isinstance(entries, list) or any(
-                        not isinstance(entry, dict) or not isinstance(entry.get("full_path"), str)
-                        for entry in entries
-                    ):
-                        raise ValueError("Unexpected search response")
-                except Exception as exc:
-                    raise RuntimeError(f"MiNERVA search is unavailable. Please try again. ({exc})") from exc
+                entries = None
+        if entries is None:
+            request = Request(
+                SEARCH_API_URL + "?" + urlencode({"query": query, "tokenised": "true"}),
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            )
+            try:
+                with urlopen(request, timeout=REMOTE_SEARCH_TIMEOUT_SECONDS) as response:
+                    entries = json.load(response)
+                if not isinstance(entries, list) or any(
+                    not isinstance(entry, dict) or not isinstance(entry.get("full_path"), str)
+                    for entry in entries
+                ):
+                    raise ValueError("Unexpected search response")
+            except Exception as exc:
+                raise RuntimeError(f"MiNERVA search is unavailable. Please try again. ({exc})") from exc
+            with self._remote_lock:
                 self._remote_cache[query] = (time.monotonic(), entries)
                 while len(self._remote_cache) > 32:
                     self._remote_cache.popitem(last=False)
+        with self._lock:
+            if request_id != self._remote_request:
+                raise RuntimeError("Search superseded by a newer query")
 
         results = []
         seen = set()
@@ -433,6 +465,7 @@ class SearchIndex:
                 "region": region_for_title(title), "extension": extension,
                 "kind": kind, "formatGroup": group, "route": route,
             })
+        results.sort(key=lambda result: remote_rank(result, query))
         return {
             "results": results[:limit], "total": min(len(results), limit),
             "more": len(entries) > 100 or len(results) > limit, "source": "remote",

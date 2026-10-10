@@ -127,9 +127,36 @@ class SearchIndexTest(unittest.TestCase):
                 self.assertEqual(len(limited["results"]), 1)
                 self.assertTrue(limited["more"])
                 fetch.assert_called_once()
-                self.assertEqual(fetch.call_args.args[0].full_url, config.SEARCH_API_URL + "?query=fixture")
+                self.assertEqual(fetch.call_args.args[0].full_url, config.SEARCH_API_URL + "?query=fixture&tokenised=true")
                 build.assert_not_called()
                 self.assertFalse(index._database_file.exists())
+
+    def test_remote_results_prefer_exact_titles_and_curated_sets(self) -> None:
+        entries = [
+            {"full_path": "./TOSEC/Nintendo/Game Boy Advance/Games/Fixture Hack (2004)(-)[h].zip"},
+            {"full_path": "./TOSEC/Nintendo/Game Boy Advance/Games/Fixture (2004)(Nintendo).zip"},
+            {"full_path": "./No-Intro/Nintendo - Game Boy Advance/Fixture (USA).zip"},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "missing.sqlite3"
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = json.dumps(entries).encode()
+            with mock.patch.object(catalog, "urlopen", return_value=response):
+                names = [item["fileName"] for item in index.search("fixture")["results"]]
+        self.assertEqual(names[0], "Fixture (USA).zip")
+        self.assertEqual(names[-1], "Fixture Hack (2004)(-)[h].zip")
+
+    def test_torrent_candidates_use_cdn_root(self) -> None:
+        urls = torrents.candidate_torrent_urls(
+            "", "No-Intro/Nintendo - Game Boy Advance/Fixture (USA).zip"
+        )
+        self.assertEqual(
+            urls[0],
+            "https://cdn.minerva-archive.org/"
+            "Minerva_Myrient%20-%20No-Intro%20-%20Nintendo%20-%20Game%20Boy%20Advance.torrent",
+        )
+        self.assertFalse(any("/torrents/" in url for url in urls))
 
     def test_remote_errors_are_visible_and_not_cached(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
