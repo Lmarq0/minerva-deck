@@ -1,20 +1,25 @@
-"""Disk-backed full-text catalog for the MiNERVA archive."""
+"""Online catalog search with support for existing disk-backed indexes."""
 
 from __future__ import annotations
 
 import gzip
+import json
 import re
 import shutil
 import sqlite3
 import threading
+import time
+from collections import OrderedDict
 from contextlib import closing
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .config import (
     CACHE_DIR,
     CATALOG_SCHEMA_VERSION,
     MAX_SEARCH_RESULTS,
+    SEARCH_API_URL,
     SEARCH_INDEX_URL,
     USER_AGENT,
 )
@@ -122,6 +127,9 @@ def useful_catalog_section(value: str) -> bool:
 class SearchIndex:
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._remote_lock = threading.Lock()
+        self._remote_request = 0
+        self._remote_cache: OrderedDict[str, Tuple[float, list]] = OrderedDict()
         self._index_file = CACHE_DIR / "index.txt.gz"
         self._database_file = CACHE_DIR / "catalog.sqlite3"
         self._checked = False
@@ -168,16 +176,20 @@ class SearchIndex:
     def _database_count(self) -> int:
         try:
             with closing(sqlite3.connect(self._database_file)) as connection:
-                row = connection.execute("SELECT COUNT(*) FROM files").fetchone()
+                row = connection.execute(
+                    "SELECT value FROM catalog_meta WHERE key = 'entry_count'"
+                ).fetchone()
+                if not row:
+                    row = connection.execute("SELECT COUNT(*) FROM files").fetchone()
                 return int(row[0]) if row else 0
-        except sqlite3.Error:
+        except (sqlite3.Error, ValueError):
             return 0
 
     def ensure_started(self) -> bool:
         if self.status()["ready"]:
             return True
         with self._lock:
-            if self._loading:
+            if self._loading or self._error:
                 return False
             self._loading = True
             self._stage = "Starting"
@@ -356,6 +368,76 @@ class SearchIndex:
             with self._lock:
                 self._loading = False
 
+    def _search_remote(
+        self, query: str, limit: int, games_only: bool, format_group: str,
+    ) -> Dict[str, Any]:
+        query = query.strip().lower()
+        if len(query) < 3:
+            return {"results": [], "total": 0, "source": "remote"}
+        with self._lock:
+            self._remote_request += 1
+            request_id = self._remote_request
+        # Serialize requests and reuse identical queries when filters change.
+        # Bound both memory use and cache lifetime; failed requests are not cached.
+        with self._remote_lock:
+            # Discard superseded requests waiting behind an in-flight search.
+            with self._lock:
+                if request_id != self._remote_request:
+                    raise RuntimeError("Search superseded by a newer query")
+            cached = self._remote_cache.get(query)
+            if cached and time.monotonic() - cached[0] < 60:
+                entries = cached[1]
+                self._remote_cache.move_to_end(query)
+            else:
+                request = Request(
+                    SEARCH_API_URL + "?" + urlencode({"query": query}),
+                    headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+                )
+                try:
+                    with urlopen(request, timeout=20) as response:
+                        entries = json.load(response)
+                    if not isinstance(entries, list) or any(
+                        not isinstance(entry, dict) or not isinstance(entry.get("full_path"), str)
+                        for entry in entries
+                    ):
+                        raise ValueError("Unexpected search response")
+                except Exception as exc:
+                    raise RuntimeError(f"MiNERVA search is unavailable. Please try again. ({exc})") from exc
+                self._remote_cache[query] = (time.monotonic(), entries)
+                while len(self._remote_cache) > 32:
+                    self._remote_cache.popitem(last=False)
+
+        results = []
+        seen = set()
+        for entry in entries:
+            path = normalize_minerva_path(entry["full_path"])
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            parts = path.split("/")
+            title = parts[-1]
+            extension = catalog_extension(title)
+            kind = catalog_kind(path, extension)
+            group = catalog_format_group(extension)
+            if games_only and kind != "game":
+                continue
+            if format_group in {"archive", "disc", "rom", "package"} and group != format_group:
+                continue
+            route = emudeck_route_for_path(path)
+            section = parts[1] if len(parts) > 2 else ""
+            platform = route["system"] if route else section if useful_catalog_section(section) else "Unknown system"
+            results.append({
+                "path": path, "normalizedPath": path, "fileName": title,
+                "collection": parts[0] if len(parts) > 1 else "",
+                "system": platform, "platform": platform,
+                "region": region_for_title(title), "extension": extension,
+                "kind": kind, "formatGroup": group, "route": route,
+            })
+        return {
+            "results": results[:limit], "total": min(len(results), limit),
+            "more": len(entries) > 100 or len(results) > limit, "source": "remote",
+        }
+
     def search(
         self,
         query: str,
@@ -363,8 +445,10 @@ class SearchIndex:
         games_only: bool = True,
         format_group: str = "",
     ) -> Optional[Dict[str, Any]]:
-        if not self.ensure_started():
-            return None
+        # The public bulk index was retired. Reuse an existing local catalog,
+        # but never start a multi-million-entry build during interactive search.
+        if not self.status()["ready"]:
+            return self._search_remote(query, limit, games_only, format_group)
 
         normalized_query = normalized_match_text(query)
         tokens = normalized_query.split()

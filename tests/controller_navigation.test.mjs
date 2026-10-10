@@ -136,3 +136,34 @@ test("reset requires a fresh neutral observation", () => {
   input.poll([gamepad({ pressed: [13] })]);
   assert.deepEqual(events, ["down", "down"]);
 });
+
+test("poller sleeps without standard controllers and stops on focus loss", async () => {
+  const { createGamepadPoller } = await import("../public/static/controller.js");
+  let active = true;
+  let pads = [];
+  let pending = null;
+  let delay = 0;
+  let samples = 0;
+  let resets = 0;
+  const poller = createGamepadPoller({
+    input: { poll() { samples++; }, reset() { resets++; } },
+    getGamepads: () => pads,
+    isActive: () => active,
+    setTimer(callback, ms) { pending = callback; delay = ms; return 1; },
+    clearTimer() { pending = null; },
+  });
+  poller.start();
+  assert.equal(delay, 250);
+  pads = [gamepad()];
+  pending();
+  assert.equal(delay, 33);
+  active = false;
+  pending();
+  assert.equal(samples, 2);
+  assert.ok(resets >= 2);
+  active = true;
+  poller.start();
+  assert.equal(samples, 3);
+  poller.stop();
+  assert.equal(pending, null);
+});

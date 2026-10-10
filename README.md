@@ -28,7 +28,7 @@ Download the `.exe` and open it. It is portable and does not need an installer.
 Initial releases are unsigned, so Windows SmartScreen may display a warning. Verify the SHA-256 checksum before running a downloaded build:
 
 ```powershell
-Get-FileHash .\MiNERVA-Deck-1.0.2-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\MiNERVA-Deck-1.0.3-windows-x64.exe -Algorithm SHA256
 ```
 
 ### Steam Deck
@@ -36,8 +36,8 @@ Get-FileHash .\MiNERVA-Deck-1.0.2-windows-x64.exe -Algorithm SHA256
 Switch to Desktop Mode, download the AppImage, make it executable, and open it:
 
 ```bash
-chmod +x MiNERVA-Deck-1.0.2-steamdeck-x86_64.AppImage
-./MiNERVA-Deck-1.0.2-steamdeck-x86_64.AppImage
+chmod +x MiNERVA-Deck-1.0.3-steamdeck-x86_64.AppImage
+./MiNERVA-Deck-1.0.3-steamdeck-x86_64.AppImage
 ```
 
 The release targets Steam Deck Desktop Mode. There is no separate gaming-session launcher.
@@ -50,7 +50,7 @@ sha256sum -c SHA256SUMS.txt
 
 ## What It Does
 
-- Searches the cached MiNERVA catalog through a disk-backed SQLite full-text index.
+- Searches MiNERVA’s current API, while reusing an existing SQLite catalog for offline searches.
 - Loads torrent metadata and lets you select exactly one file.
 - Downloads only the selected file and stops immediately after verification.
 - Provides a Downloads center with selected-file progress, transfer rate, peer count, saved paths, logs, errors, warnings, and filters.
@@ -61,7 +61,9 @@ sha256sum -c SHA256SUMS.txt
 - Remembers window geometry and the selected destination.
 - Prevents a second launch from starting another backend; it focuses the existing window instead.
 
-The first search downloads and indexes the public catalog. This can take a little longer because the catalog contains roughly three million records. Later searches use the local index and are normally near-instant.
+Enter at least three characters to search. New installs use MiNERVA’s search API and need an internet connection; they no longer download and build the retired bulk catalog. Repeated queries are cached briefly. Games-only and format filters apply to the returned page; refine a broad query if the interface says more matches are available. Existing valid SQLite catalogs are still reused offline.
+
+Controller input is sampled at about 30 Hz while the window is focused, with slower checks when no standard controller is present. Input polling stops when the window is hidden or loses focus. These changes reduce background work; actual temperature and fan speed still depend on downloads, extraction, and the device.
 
 ## Download Destination
 
@@ -125,7 +127,7 @@ minerva_deck.py                 Nuitka build entry point
 minerva_app/cli.py              Command-line modes and self-test
 minerva_app/desktop.py          Qt window, single-instance handling, lifecycle
 minerva_app/server.py           Loopback HTTP server and authenticated API
-minerva_app/catalog.py          Catalog download and SQLite FTS index
+minerva_app/catalog.py          Remote search and existing SQLite FTS catalog
 minerva_app/torrents.py         Torrent metadata and file selection
 minerva_app/downloader.py       Selective in-process torrent download
 minerva_app/jobs.py             Single-item job queue and progress state
@@ -202,7 +204,7 @@ Run the complete source suite:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 node --check public\static\app.js
 node --check public\static\controller.js
-node --test tests\controller_navigation.test.mjs
+node --test tests\controller_navigation.test.mjs tests\app_search.test.mjs
 .\.venv\Scripts\python.exe minerva_deck.py --self-test
 ```
 

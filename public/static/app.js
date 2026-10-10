@@ -1,4 +1,4 @@
-import { ControllerInput } from "./controller.js";
+import { ControllerInput, createGamepadPoller } from "./controller.js";
 
 const state = {
   status: null,
@@ -270,19 +270,25 @@ async function loadStatus() {
   updateDownloadButton();
 }
 
-function scheduleSearch(delay = 240) {
+function scheduleSearch(delay = 400) {
   clearTimeout(state.searchTimer);
   clearTimeout(state.searchPollTimer);
+  state.searchPollTimer = null;
+  ++state.searchRequest;
+  state.searchAbort?.abort();
   state.searchTimer = setTimeout(() => search(elements.query.value), delay);
 }
 
 async function search(query, { polling = false } = {}) {
+  clearTimeout(state.searchPollTimer);
+  state.searchPollTimer = null;
   const trimmed = query.trim();
-  if (trimmed.length < 2) {
+  if (trimmed.length < 3) {
+    ++state.searchRequest;
     state.searchAbort?.abort();
     elements.searchCount.textContent = "Ready";
     setResultsBusy(false);
-    showEmptyResults("Search the archive", "Try a game title, a platform like SNES, or a region like USA.");
+    showEmptyResults("Search the archive", "Enter at least three characters: a game title, platform, or region.");
     return;
   }
 
@@ -311,13 +317,14 @@ async function search(query, { polling = false } = {}) {
     const payload = await response.json();
     if (requestId !== state.searchRequest) return;
 
+    if (payload.indexing?.error) throw new Error(payload.indexing.error);
+    if (!response.ok && response.status !== 202) throw new Error(payload.error || "Search failed");
     if (response.status === 202 || payload.indexing?.ready === false) {
       renderIndexing(payload.indexing || payload.loaded || {});
-      state.searchPollTimer = setTimeout(() => search(trimmed, { polling: true }), 850);
+      state.searchPollTimer = setTimeout(() => search(trimmed, { polling: true }), 2000);
       return;
     }
-    if (!response.ok) throw new Error(payload.error || "Search failed");
-    renderResults(payload.results || [], payload.total || 0);
+    renderResults(payload.results || [], payload.total || 0, payload.more);
   } catch (error) {
     if (error.name === "AbortError" || requestId !== state.searchRequest) return;
     elements.searchCount.textContent = "Unavailable";
@@ -344,11 +351,12 @@ function renderIndexing(indexing) {
   `;
 }
 
-function renderResults(results, total) {
+function renderResults(results, total, more = false) {
   clearTimeout(state.searchPollTimer);
   state.searchPollTimer = null;
   setResultsBusy(false);
-  elements.searchCount.textContent = total === 1 ? "1 result" : `${total.toLocaleString()} results`;
+  const countLabel = total === 1 ? "1 result" : `${total.toLocaleString()} results`;
+  elements.searchCount.textContent = countLabel + (more ? " shown — refine your search for more" : "");
   if (!results.length) {
     showEmptyResults("No games found", "Try fewer words, a different platform, or turn off Games only.");
     return;
@@ -1008,7 +1016,7 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
-  showEmptyResults("Search the archive", "Try a game title, a platform like SNES, or a region like USA.");
+  showEmptyResults("Search the archive", "Enter at least three characters: a game title, platform, or region.");
   await loadStatus();
   pollQueue();
   requestAnimationFrame(() => {
@@ -1109,24 +1117,22 @@ function isInDirection(direction, dx, dy) {
 function startGamepadNavigation() {
   if (startGamepadNavigation.started) return;
   startGamepadNavigation.started = true;
+  const poller = createGamepadPoller({
+    input: controllerInput,
+    getGamepads: () => navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [],
+    isActive: () => !document.hidden && document.hasFocus(),
+  });
   window.addEventListener("gamepaddisconnected", (event) => {
     controllerInput.disconnect(event.gamepad.index);
   });
-  window.addEventListener("blur", () => controllerInput.reset());
+  window.addEventListener("gamepadconnected", () => poller.start());
+  window.addEventListener("blur", () => poller.stop());
+  window.addEventListener("focus", () => poller.start());
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) controllerInput.reset();
+    if (document.hidden) poller.stop();
+    else poller.start();
   });
-
-  const tick = () => {
-    pollGamepads();
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
-}
-
-function pollGamepads() {
-  const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
-  controllerInput.poll(pads);
+  poller.start();
 }
 
 function acceptControllerAction() {

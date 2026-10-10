@@ -57,7 +57,7 @@ Assert-NativeCommand "license collection"
 Assert-NativeCommand "test suite"
 node --check public\static\app.js
 node --check public\static\controller.js
-node --test tests\controller_navigation.test.mjs
+node --test tests\controller_navigation.test.mjs tests\app_search.test.mjs
 Assert-NativeCommand "JavaScript test suite"
 
 $includeLicenses = "--include-data-dir=$licenses=licenses"

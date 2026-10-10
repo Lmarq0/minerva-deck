@@ -244,3 +244,25 @@ export class ControllerInput {
     this.repeat = { direction: null, nextAt: 0 };
   }
 }
+
+// Sleep between input samples instead of keeping Chromium's frame loop active.
+export function createGamepadPoller({
+  input, getGamepads, isActive,
+  setTimer = setTimeout, clearTimer = clearTimeout,
+}) {
+  let timer = null;
+  const stop = () => {
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+    input.reset();
+  };
+  const tick = () => {
+    timer = null;
+    if (!isActive()) return stop();
+    const pads = getGamepads();
+    input.poll(pads);
+    const hasController = pads.some((pad) => pad?.connected !== false && pad?.mapping === "standard");
+    timer = setTimer(tick, hasController ? 33 : 250);
+  };
+  return { stop, start() { stop(); tick(); } };
+}

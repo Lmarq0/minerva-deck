@@ -105,6 +105,63 @@ class CatalogHelpersTest(unittest.TestCase):
 
 
 class SearchIndexTest(unittest.TestCase):
+    def test_remote_search_filters_and_caches_without_building_catalog(self) -> None:
+        entries = [
+            {"full_path": "./No-Intro/Nintendo - Game Boy Advance/Fixture (USA).gba"},
+            {"full_path": "./No-Intro/Nintendo - Game Boy Advance/Fixture (USA).zip"},
+            {"full_path": "./MAME/EXTRAs/covers/Fixture.png"},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "missing.sqlite3"
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = json.dumps(entries).encode()
+            with mock.patch.object(catalog, "urlopen", return_value=response) as fetch, mock.patch.object(index, "_build_database") as build:
+                result = index.search("Fixture")
+                self.assertEqual(result["total"], 2)
+                self.assertEqual(result["results"][0]["platform"], "Nintendo Game Boy Advance")
+                self.assertEqual(result["results"][0]["region"], "USA")
+                self.assertEqual(index.search("fixture", format_group="rom")["total"], 1)
+                self.assertEqual(index.search("fixture", games_only=False)["total"], 3)
+                limited = index.search("fixture", limit=1)
+                self.assertEqual(len(limited["results"]), 1)
+                self.assertTrue(limited["more"])
+                fetch.assert_called_once()
+                self.assertEqual(fetch.call_args.args[0].full_url, config.SEARCH_API_URL + "?query=fixture")
+                build.assert_not_called()
+                self.assertFalse(index._database_file.exists())
+
+    def test_remote_errors_are_visible_and_not_cached(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "missing.sqlite3"
+            with mock.patch.object(catalog, "urlopen", side_effect=OSError("network unavailable")) as fetch:
+                for _ in range(2):
+                    with self.assertRaisesRegex(RuntimeError, "MiNERVA search is unavailable"):
+                        index.search("fixture")
+                self.assertEqual(fetch.call_count, 2)
+                self.assertEqual(index.search("ab")["results"], [])
+                self.assertEqual(fetch.call_count, 2)
+
+    def test_remote_rejects_unexpected_response(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "missing.sqlite3"
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = b'{"error":"upstream error"}'
+            with mock.patch.object(catalog, "urlopen", return_value=response):
+                with self.assertRaisesRegex(RuntimeError, "Unexpected search response"):
+                    index.search("fixture")
+
+    def test_failed_build_does_not_restart_on_every_poll(self) -> None:
+        index = catalog.SearchIndex()
+        index._checked = True
+        index._error = "catalog preparation failed"
+        with mock.patch.object(catalog.threading, "Thread") as worker:
+            self.assertFalse(index.ensure_started())
+            self.assertFalse(index.ensure_started())
+            worker.assert_not_called()
+
     def test_ranked_disk_catalog_and_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -142,6 +199,12 @@ class SearchIndexTest(unittest.TestCase):
             assert rom_result is not None
             self.assertEqual(rom_result["total"], 1)
             self.assertEqual(rom_result["results"][0]["extension"], "sfc")
+
+            reopened = catalog.SearchIndex()
+            reopened._database_file = index._database_file
+            with mock.patch.object(catalog, "urlopen", side_effect=AssertionError("offline")):
+                self.assertEqual(reopened.status()["count"], len(rows))
+                self.assertEqual(reopened.search("metroid fusion")["total"], 1)
 
 
 class PathSafetyTest(unittest.TestCase):

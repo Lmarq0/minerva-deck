@@ -41,7 +41,7 @@ export LIBARCHIVE="$(find "$NATIVE" -maxdepth 1 -name 'libarchive.so*' | head -n
 "$VENV/bin/python" -m unittest discover -s tests -v
 node --check public/static/app.js
 node --check public/static/controller.js
-node --test tests/controller_navigation.test.mjs
+node --test tests/controller_navigation.test.mjs tests/app_search.test.mjs
 
 rm -rf "$PWD/build/deck" "$PWD/build/AppDir"
 "$VENV/bin/python" -m nuitka \

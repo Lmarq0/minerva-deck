@@ -38,7 +38,7 @@ jobs:
         run: |
           node --check public/static/app.js
           node --check public/static/controller.js
-          node --test tests/controller_navigation.test.mjs
+          node --test tests/controller_navigation.test.mjs tests/app_search.test.mjs
       - name: Packaged entry self-test prerequisites
         if: runner.os == 'Linux'
         env:
