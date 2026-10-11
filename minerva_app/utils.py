@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import ssl
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -11,6 +14,31 @@ from urllib.parse import quote, unquote
 from urllib.request import Request, urlopen
 
 from .config import USER_AGENT
+
+
+CA_BUNDLE_CANDIDATES = (
+    "/etc/ssl/certs/ca-certificates.crt",  # SteamOS, Arch, Debian, Ubuntu
+    "/etc/pki/tls/certs/ca-bundle.crt",  # Fedora
+    "/etc/ssl/ca-bundle.pem",  # openSUSE
+    "/etc/ssl/cert.pem",  # Alpine
+)
+
+
+def configure_ca_certificates() -> None:
+    """Point the bundled OpenSSL at the host's CA certificates.
+
+    The AppImage's OpenSSL was built on Ubuntu and looks in /usr/lib/ssl,
+    which SteamOS does not have, so every HTTPS request failed verification.
+    """
+    if not sys.platform.startswith("linux") or "SSL_CERT_FILE" in os.environ:
+        return
+    defaults = ssl.get_default_verify_paths()
+    if defaults.cafile or defaults.capath:
+        return
+    for candidate in CA_BUNDLE_CANDIDATES:
+        if os.path.isfile(candidate):
+            os.environ["SSL_CERT_FILE"] = candidate
+            return
 
 
 def json_bytes(payload: Any) -> bytes:

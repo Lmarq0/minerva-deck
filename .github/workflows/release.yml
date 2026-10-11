@@ -34,6 +34,14 @@ jobs:
         run: |
           chmod +x build-deck.sh packaging/AppRun
           ./build-deck.sh
+      - name: Check the AppImage on an Arch-based system like SteamOS
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" archlinux:latest bash -c '
+            cp /dist/*.AppImage /tmp/app && cd /tmp && chmod +x app
+            ./app --appimage-extract >/dev/null
+            QT_QPA_PLATFORM=offscreen squashfs-root/AppRun --self-test > result.json
+            cat result.json
+            grep -q "\"tls\": true" result.json'
       - uses: actions/upload-artifact@v7
         with:
           name: steamdeck-x86_64
