@@ -1,6 +1,8 @@
 import configparser
 import gzip
+import hashlib
 import json
+import lzma
 import tempfile
 import threading
 import time
@@ -104,48 +106,152 @@ class CatalogHelpersTest(unittest.TestCase):
         self.assertEqual(catalog.region_for_title("Metroid Fusion.gba"), "")
 
 
-class SearchIndexTest(unittest.TestCase):
-    def test_remote_search_filters_and_caches_without_building_catalog(self) -> None:
-        entries = [
-            {"full_path": "./No-Intro/Nintendo - Game Boy Advance/Fixture (USA).gba"},
-            {"full_path": "./No-Intro/Nintendo - Game Boy Advance/Fixture (USA).zip"},
-            {"full_path": "./MAME/EXTRAs/covers/Fixture.png"},
-        ]
-        with tempfile.TemporaryDirectory() as folder:
-            index = catalog.SearchIndex()
-            index._database_file = Path(folder) / "missing.sqlite3"
-            response = mock.MagicMock()
-            response.__enter__.return_value.read.return_value = json.dumps(entries).encode()
-            with mock.patch.object(catalog, "urlopen", return_value=response) as fetch, mock.patch.object(index, "_build_database") as build:
-                result = index.search("Fixture")
-                self.assertEqual(result["total"], 2)
-                self.assertEqual(result["results"][0]["platform"], "Nintendo Game Boy Advance")
-                self.assertEqual(result["results"][0]["region"], "USA")
-                self.assertEqual(index.search("fixture", format_group="rom")["total"], 1)
-                self.assertEqual(index.search("fixture", games_only=False)["total"], 3)
-                limited = index.search("fixture", limit=1)
-                self.assertEqual(len(limited["results"]), 1)
-                self.assertTrue(limited["more"])
-                fetch.assert_called_once()
-                self.assertEqual(fetch.call_args.args[0].full_url, config.SEARCH_API_URL + "?query=fixture&tokenised=true")
-                build.assert_not_called()
-                self.assertFalse(index._database_file.exists())
+CATALOG_FIXTURE = [
+    (
+        "Minerva_Myrient - No-Intro - Nintendo - Super Nintendo Entertainment System.torrent",
+        [
+            (0, "No-Intro/Nintendo - Super Nintendo Entertainment System/Super Mario World (USA).sfc", 524288),
+            (1, "No-Intro/Nintendo - Super Nintendo Entertainment System/.pad/12345", 100),
+        ],
+    ),
+    (
+        "Minerva_Myrient - MAME - EXTRAs.torrent",
+        [(0, "MAME/EXTRAs/covers/Super Mario World (USA).png", 2048)],
+    ),
+    (
+        "Minerva_Myrient - No-Intro - Nintendo - Game Boy Advance.torrent",
+        [(0, "No-Intro/Nintendo - Game Boy Advance/Metroid Fusion (USA).gba", 8388608)]
+        + [
+            (number + 1, f"No-Intro/Nintendo - Game Boy Advance/Fixture Game {number:03d} (USA).gba", 1024)
+            for number in range(30)
+        ],
+    ),
+]
 
-    def test_remote_results_prefer_exact_titles_and_curated_sets(self) -> None:
-        entries = [
-            {"full_path": "./TOSEC/Nintendo/Game Boy Advance/Games/Fixture Hack (2004)(-)[h].zip"},
-            {"full_path": "./TOSEC/Nintendo/Game Boy Advance/Games/Fixture (2004)(Nintendo).zip"},
-            {"full_path": "./No-Intro/Nintendo - Game Boy Advance/Fixture (USA).zip"},
-        ]
+
+def write_catalog_release(folder: Path) -> tuple:
+    """Build a catalog plus the compressed file and manifest the app downloads."""
+    database = folder / "built.sqlite3"
+    stats = catalog.build_catalog(database, CATALOG_FIXTURE)
+    compressed = lzma.compress(database.read_bytes())
+    manifest = {
+        "schema": config.CATALOG_SCHEMA_VERSION,
+        "file": "minerva-catalog-test.sqlite3.xz",
+        "size": len(compressed),
+        "sha256": hashlib.sha256(compressed).hexdigest(),
+        **stats,
+    }
+    return manifest, compressed
+
+
+def catalog_download_mocks(manifest: dict, compressed: bytes):
+    response = mock.MagicMock()
+    response.__enter__.return_value.read.side_effect = [compressed, b""]
+    return (
+        mock.patch.object(catalog, "fetch_bytes", return_value=json.dumps(manifest).encode()),
+        mock.patch.object(catalog, "urlopen", return_value=response),
+    )
+
+
+class SearchIndexTest(unittest.TestCase):
+    def test_built_catalog_searches_offline_with_torrent_details(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             index = catalog.SearchIndex()
-            index._database_file = Path(folder) / "missing.sqlite3"
-            response = mock.MagicMock()
-            response.__enter__.return_value.read.return_value = json.dumps(entries).encode()
-            with mock.patch.object(catalog, "urlopen", return_value=response):
-                names = [item["fileName"] for item in index.search("fixture")["results"]]
-        self.assertEqual(names[0], "Fixture (USA).zip")
-        self.assertEqual(names[-1], "Fixture Hack (2004)(-)[h].zip")
+            index._database_file = Path(folder) / "catalog.sqlite3"
+            stats = catalog.build_catalog(index._database_file, CATALOG_FIXTURE)
+            self.assertEqual(stats["entries"], 33)
+            self.assertEqual(stats["torrents"], 3)
+
+            with mock.patch.object(catalog, "urlopen", side_effect=AssertionError("offline")), \
+                    mock.patch.object(catalog, "fetch_bytes", side_effect=AssertionError("offline")):
+                result = index.search("super mario world")
+                assert result is not None
+                self.assertEqual(result["total"], 1)
+                item = result["results"][0]
+                self.assertEqual(item["fileName"], "Super Mario World (USA).sfc")
+                self.assertEqual(item["platform"], "Nintendo Super Nintendo")
+                self.assertEqual(item["fileIndex"], 1)
+                self.assertEqual(item["sizeBytes"], 524288)
+                self.assertEqual(
+                    item["torrentUrl"],
+                    "https://cdn.minerva-archive.org/Minerva_Myrient%20-%20No-Intro%20-%20"
+                    "Nintendo%20-%20Super%20Nintendo%20Entertainment%20System.torrent",
+                )
+                self.assertEqual(index.search("super mario world", games_only=False)["total"], 2)
+                self.assertEqual(index.search("metroid", format_group="rom")["total"], 1)
+                self.assertEqual(index.search("metroid", format_group="disc")["total"], 0)
+                limited = index.search("fixture game", limit=5)
+                self.assertEqual(len(limited["results"]), 5)
+                self.assertTrue(limited["more"])
+
+    def test_missing_catalog_is_downloaded_and_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            manifest, compressed = write_catalog_release(Path(folder))
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "catalog.sqlite3"
+            fetch_manifest, fetch_data = catalog_download_mocks(manifest, compressed)
+            with fetch_manifest, fetch_data, mock.patch.object(catalog.threading, "Thread") as worker:
+                self.assertIsNone(index.search("metroid fusion"))
+                worker.assert_called_once()
+                index._download_catalog()
+            self.assertTrue(index.status()["ready"])
+            self.assertEqual(index.status()["count"], 33)
+            self.assertEqual(index.search("metroid fusion")["total"], 1)
+            self.assertFalse(index._database_file.with_name("catalog.sqlite3.download").exists())
+
+    def test_corrupt_catalog_download_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            manifest, compressed = write_catalog_release(Path(folder))
+            manifest["sha256"] = "0" * 64
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "catalog.sqlite3"
+            fetch_manifest, fetch_data = catalog_download_mocks(manifest, compressed)
+            with fetch_manifest, fetch_data:
+                index._loading = True
+                index._download_catalog()
+            status = index.status()
+            self.assertFalse(status["ready"])
+            self.assertIn("corrupted", status["error"])
+            self.assertFalse(index._database_file.exists())
+
+    def test_failed_download_does_not_retry_on_every_poll(self) -> None:
+        index = catalog.SearchIndex()
+        index._checked = True
+        index._error = "catalog download failed"
+        index._failed_at = time.monotonic()
+        with mock.patch.object(catalog.threading, "Thread") as worker:
+            self.assertFalse(index.ensure_started())
+            self.assertFalse(index.ensure_started())
+            worker.assert_not_called()
+            index._failed_at -= catalog.CATALOG_RETRY_SECONDS
+            self.assertFalse(index.ensure_started())
+            worker.assert_called_once()
+
+    def test_stale_catalog_refreshes_once_in_background(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "catalog.sqlite3"
+            catalog.build_catalog(index._database_file, CATALOG_FIXTURE)
+            index.status()
+            index._built_at -= catalog.CATALOG_MAX_AGE_MS
+            with mock.patch.object(catalog.threading, "Thread") as worker:
+                self.assertTrue(index.ensure_started())
+                self.assertTrue(index.ensure_started())
+                worker.assert_called_once()
+
+    def test_failed_refresh_keeps_existing_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "catalog.sqlite3"
+            catalog.build_catalog(index._database_file, CATALOG_FIXTURE)
+            index.status()
+            with mock.patch.object(catalog, "fetch_bytes", side_effect=OSError("offline")):
+                index._loading = True
+                index._download_catalog()
+            status = index.status()
+            self.assertTrue(status["ready"])
+            self.assertIsNone(status["error"])
+            self.assertEqual(index.search("metroid fusion")["total"], 1)
 
     def test_torrent_candidates_use_cdn_root(self) -> None:
         urls = torrents.candidate_torrent_urls(
@@ -157,81 +263,6 @@ class SearchIndexTest(unittest.TestCase):
             "Minerva_Myrient%20-%20No-Intro%20-%20Nintendo%20-%20Game%20Boy%20Advance.torrent",
         )
         self.assertFalse(any("/torrents/" in url for url in urls))
-
-    def test_remote_errors_are_visible_and_not_cached(self) -> None:
-        with tempfile.TemporaryDirectory() as folder:
-            index = catalog.SearchIndex()
-            index._database_file = Path(folder) / "missing.sqlite3"
-            with mock.patch.object(catalog, "urlopen", side_effect=OSError("network unavailable")) as fetch:
-                for _ in range(2):
-                    with self.assertRaisesRegex(RuntimeError, "MiNERVA search is unavailable"):
-                        index.search("fixture")
-                self.assertEqual(fetch.call_count, 2)
-                self.assertEqual(index.search("ab")["results"], [])
-                self.assertEqual(fetch.call_count, 2)
-
-    def test_remote_rejects_unexpected_response(self) -> None:
-        with tempfile.TemporaryDirectory() as folder:
-            index = catalog.SearchIndex()
-            index._database_file = Path(folder) / "missing.sqlite3"
-            response = mock.MagicMock()
-            response.__enter__.return_value.read.return_value = b'{"error":"upstream error"}'
-            with mock.patch.object(catalog, "urlopen", return_value=response):
-                with self.assertRaisesRegex(RuntimeError, "Unexpected search response"):
-                    index.search("fixture")
-
-    def test_failed_build_does_not_restart_on_every_poll(self) -> None:
-        index = catalog.SearchIndex()
-        index._checked = True
-        index._error = "catalog preparation failed"
-        with mock.patch.object(catalog.threading, "Thread") as worker:
-            self.assertFalse(index.ensure_started())
-            self.assertFalse(index.ensure_started())
-            worker.assert_not_called()
-
-    def test_ranked_disk_catalog_and_filters(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            index = catalog.SearchIndex()
-            index._index_file = root / "index.txt.gz"
-            index._database_file = root / "catalog.sqlite3"
-            rows = [
-                "./No-Intro/Nintendo - Super Nintendo Entertainment System/Super Mario World (USA).sfc",
-                "./MAME/EXTRAs/covers/Super Mario World (USA).png",
-                "./Internet Archive/archiver_2020/wii-u-super-nintendo-snes-nus/Super Mario World [USA].7z",
-                "./No-Intro/Nintendo - Game Boy Advance/Metroid Fusion (USA).gba",
-            ]
-            rows.extend(
-                f"./No-Intro/Nintendo - Game Boy Advance/Fixture Game {index:03d} (USA).gba"
-                for index in range(30)
-            )
-            with gzip.open(index._index_file, "wt", encoding="utf-8") as handle:
-                handle.write("\n".join(rows))
-            if index._index_file.stat().st_size < 1024:
-                with index._index_file.open("ab") as handle:
-                    handle.write(b"\0" * (1024 - index._index_file.stat().st_size))
-
-            index._loading = True
-            index._build_database()
-
-            result = index.search("super mario world", games_only=True)
-            self.assertIsNotNone(result)
-            assert result is not None
-            self.assertEqual(result["total"], 2)
-            self.assertTrue(all(item["kind"] == "game" for item in result["results"]))
-            self.assertEqual(result["results"][0]["platform"], "Nintendo Super Nintendo")
-
-            rom_result = index.search("super mario", games_only=True, format_group="rom")
-            self.assertIsNotNone(rom_result)
-            assert rom_result is not None
-            self.assertEqual(rom_result["total"], 1)
-            self.assertEqual(rom_result["results"][0]["extension"], "sfc")
-
-            reopened = catalog.SearchIndex()
-            reopened._database_file = index._database_file
-            with mock.patch.object(catalog, "urlopen", side_effect=AssertionError("offline")):
-                self.assertEqual(reopened.status()["count"], len(rows))
-                self.assertEqual(reopened.search("metroid fusion")["total"], 1)
 
 
 class PathSafetyTest(unittest.TestCase):

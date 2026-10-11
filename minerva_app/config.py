@@ -9,16 +9,17 @@ from .resources import public_root
 
 
 APP_NAME = "MiNERVA Deck"
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 PUBLIC_ROOT = public_root()
 MINERVA_BASE = "https://minerva-archive.org"
 MINERVA_CDN = "https://cdn.minerva-archive.org"
 USER_AGENT = f"MiNERVA-Deck/{APP_VERSION} (+local selective torrent helper)"
 DEFAULT_PORT = 8765
 MAX_SEARCH_RESULTS = 48
-CATALOG_SCHEMA_VERSION = 6
-SEARCH_API_URL = f"{MINERVA_BASE}/v1/api/rom/search"
-SEARCH_INDEX_URL = f"{MINERVA_BASE}/assets/index.txt.gz"
+CATALOG_SCHEMA_VERSION = 7
+# The offline catalog is rebuilt weekly by .github/workflows/catalog.yml.
+CATALOG_RELEASE_URL = "https://github.com/Lmarq0/minerva-deck/releases/download/catalog"
+CATALOG_MANIFEST_URL = f"{CATALOG_RELEASE_URL}/catalog.json"
 TORRENT_LIST_URL = f"{MINERVA_CDN}/"
 ARCHIVE_EXTENSIONS = (
     ".zip",

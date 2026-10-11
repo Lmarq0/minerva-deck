@@ -279,7 +279,7 @@ async function loadStatus() {
   updateDownloadButton();
 }
 
-function scheduleSearch(delay = 600) {
+function scheduleSearch(delay = 250) {
   clearTimeout(state.searchTimer);
   clearTimeout(state.searchPollTimer);
   state.searchPollTimer = null;
@@ -310,7 +310,7 @@ async function search(query, { polling = false } = {}) {
   setResultsBusy(true);
   elements.searchCount.textContent = polling ? "Preparing…" : "Searching…";
   if (!polling) {
-    showEmptyResults("Looking through MiNERVA", "MiNERVA's search server can take up to a minute to answer. Repeat searches are instant.");
+    showEmptyResults("Looking through MiNERVA", "This should only take a moment.");
   }
 
   const params = new URLSearchParams({
@@ -346,14 +346,18 @@ async function search(query, { polling = false } = {}) {
 }
 
 function renderIndexing(indexing) {
-  const processed = Number(indexing.processed || indexing.count || 0);
-  const detail = processed
-    ? `${processed.toLocaleString()} archive entries prepared`
-    : "MiNERVA Deck is preparing fast search for the first time.";
-  elements.searchCount.textContent = indexing.stage || "Preparing";
+  const processed = Number(indexing.processed || 0);
+  const total = Number(indexing.total || 0);
+  const megabytes = (bytes) => (bytes / 1048576).toFixed(1);
+  const detail = total
+    ? `${megabytes(processed)} of ${megabytes(total)} MB. This happens once; search then works offline.`
+    : "MiNERVA Deck downloads its game catalog once; search then works offline.";
+  elements.searchCount.textContent = total
+    ? `${Math.floor((processed / total) * 100)}%`
+    : indexing.stage || "Preparing";
   elements.results.innerHTML = `
     <div class="empty-note">
-      <strong>Building your game catalog</strong>
+      <strong>${escapeHtml(indexing.stage || "Preparing the game catalog")}</strong>
       <span>${escapeHtml(detail)}</span>
       <div class="index-progress" aria-hidden="true"><span></span></div>
     </div>
@@ -428,7 +432,17 @@ function selectResult(result) {
   updateDestinationSummary();
   updateDownloadButton();
   loadRoute(result.path, requestId);
-  loadMetadata(result.path, requestId);
+  // Catalog results already identify their torrent; only older entries need a lookup.
+  if (result.torrentUrl && Number.isFinite(result.sizeBytes)) {
+    state.selectedMetadata = {
+      torrentUrl: result.torrentUrl,
+      fileIndex: result.fileIndex,
+      sizeBytes: result.sizeBytes,
+      size: result.size,
+    };
+  } else {
+    loadMetadata(result.path, requestId);
+  }
 
   if (window.matchMedia("(max-width: 900px)").matches) {
     elements.selectionCard.scrollIntoView({ behavior: "smooth", block: "start" });

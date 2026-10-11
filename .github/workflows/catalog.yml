@@ -1,0 +1,39 @@
+name: Catalog
+
+# Rebuilds the offline search catalog from MiNERVA's torrents and publishes
+# it to the "catalog" release, where the app downloads it from.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalog
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build catalog
+        run: python -m minerva_app.catalog_build build/catalog
+      - name: Publish catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view catalog >/dev/null 2>&1 || gh release create catalog \
+            --prerelease --title "Game catalog" \
+            --notes "Offline search catalog for MiNERVA Deck, rebuilt weekly from MiNERVA's torrents. The app downloads this automatically."
+          # Upload the data before the manifest that points to it.
+          gh release upload catalog build/catalog/minerva-catalog-*.sqlite3.xz
+          gh release upload catalog build/catalog/catalog.json --clobber
+          # Keep the previous file for clients mid-download; delete older ones.
+          gh release view catalog --json assets --jq '.assets[].name' \
+            | grep '^minerva-catalog-' | sort | head -n -2 \
+            | xargs -r -n 1 gh release delete-asset catalog --yes
