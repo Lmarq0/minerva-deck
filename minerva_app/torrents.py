@@ -93,7 +93,11 @@ class TorrentSelection:
 
 
 def parse_torrent(torrent_path: Path) -> Tuple[str, List[TorrentFile]]:
-    decoded, _ = bdecode(torrent_path.read_bytes())
+    return parse_torrent_data(torrent_path.read_bytes())
+
+
+def parse_torrent_data(data: bytes) -> Tuple[str, List[TorrentFile]]:
+    decoded, _ = bdecode(data)
     info = decoded.get(b"info")
     if not isinstance(info, dict):
         raise BencodeError("Torrent info dictionary is missing")

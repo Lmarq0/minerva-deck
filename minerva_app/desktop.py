@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.request import Request, urlopen
 
+from .catalog import SEARCH_INDEX
 from .config import APP_NAME, DATA_DIR, WEB_PROFILE_DIR, ensure_dirs
 from .downloader import torrent_engine_status
 from .jobs import JOBS
@@ -360,6 +361,7 @@ def _run_desktop(*, devtools: bool = False) -> int:
     )
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
+    SEARCH_INDEX.ensure_started()
     port = int(server.server_address[1])
     url = f"http://127.0.0.1:{port}"
 

@@ -1,30 +1,37 @@
-"""Online catalog search with support for existing disk-backed indexes."""
+"""Offline game catalog built from the file lists of MiNERVA's torrents."""
 
 from __future__ import annotations
 
-import gzip
+import hashlib
 import json
+import lzma
 import re
-import shutil
 import sqlite3
 import threading
 import time
-from collections import OrderedDict
 from contextlib import closing
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlencode
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .config import (
     CACHE_DIR,
+    CATALOG_MANIFEST_URL,
+    CATALOG_RELEASE_URL,
     CATALOG_SCHEMA_VERSION,
     MAX_SEARCH_RESULTS,
-    SEARCH_API_URL,
-    SEARCH_INDEX_URL,
+    TORRENT_LIST_URL,
     USER_AGENT,
 )
 from .routes import emudeck_route_for_path
-from .utils import normalize_minerva_path, normalized_match_text, now_ms
+from .utils import (
+    fetch_bytes,
+    format_bytes,
+    normalize_minerva_path,
+    normalized_match_text,
+    now_ms,
+)
 
 
 ARCHIVE_FORMATS = {"zip", "7z", "rar", "tar", "gz", "bz2", "xz", "tgz", "tbz2", "txz"}
@@ -125,351 +132,260 @@ def useful_catalog_section(value: str) -> bool:
     )
 
 
-REMOTE_SEARCH_TIMEOUT_SECONDS = 90
-REMOTE_CACHE_SECONDS = 15 * 60
-PREFERRED_COLLECTIONS = ("no-intro", "redump", "retroachievements")
+CATALOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+CATALOG_RETRY_SECONDS = 30
+CATALOG_SCHEMA = """
+CREATE TABLE torrents (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+CREATE TABLE directories (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE);
+CREATE TABLE files (
+    id INTEGER PRIMARY KEY,
+    torrent_id INTEGER NOT NULL,
+    file_index INTEGER NOT NULL,
+    directory_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    extension TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    kind INTEGER NOT NULL,
+    format_group INTEGER NOT NULL
+);
+CREATE TABLE catalog_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE VIRTUAL TABLE files_fts USING fts5(
+    title_terms,
+    path_terms,
+    content='',
+    detail=none,
+    tokenize='unicode61 remove_diacritics 2'
+);
+"""
 
 
-def remote_rank(result: Dict[str, Any], query: str) -> Tuple[int, int, int, int]:
-    """Order API results like the local catalog: exact titles and curated sets first."""
-    normalized_query = normalized_match_text(query)
-    title = normalized_match_text(re.sub(r"\.[^.]+$", "", result["fileName"]))
-    # Compare the name before "(USA)", "[h]", and similar dump tags.
-    base_title = normalized_match_text(re.split(r"[(\[]", result["fileName"], 1)[0])
-    collection = result["collection"].lower()
-    if base_title == normalized_query:
-        title_rank = 0
-    elif title.startswith(normalized_query):
-        title_rank = 1
-    elif all(token in title.split() for token in normalized_query.split()):
-        title_rank = 2
-    else:
-        title_rank = 3
-    collection_rank = (
-        PREFERRED_COLLECTIONS.index(collection)
-        if collection in PREFERRED_COLLECTIONS
-        else len(PREFERRED_COLLECTIONS)
-    )
-    return (title_rank, collection_rank, 0 if result["route"] else 1, len(title))
+def build_catalog(
+    output: Path,
+    torrents: Iterable[Tuple[str, Sequence[Tuple[int, str, int]]]],
+) -> Dict[str, int]:
+    """Write a searchable catalog from (torrent name, [(index, path, size)]) pairs."""
+    if output.exists():
+        output.unlink()
+    connection = sqlite3.connect(output)
+    try:
+        connection.execute("PRAGMA journal_mode=OFF")
+        connection.execute("PRAGMA synchronous=OFF")
+        connection.executescript(CATALOG_SCHEMA)
+        directories: Dict[str, int] = {}
+        file_batch: List[Tuple[Any, ...]] = []
+        search_batch: List[Tuple[int, str, str]] = []
+        entries = 0
+        torrent_count = 0
+
+        def flush() -> None:
+            connection.executemany(
+                "INSERT INTO files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", file_batch
+            )
+            connection.executemany(
+                "INSERT INTO files_fts(rowid, title_terms, path_terms) VALUES (?, ?, ?)",
+                search_batch,
+            )
+            file_batch.clear()
+            search_batch.clear()
+
+        for torrent_name, files in torrents:
+            torrent_count += 1
+            connection.execute(
+                "INSERT INTO torrents(id, name) VALUES (?, ?)", (torrent_count, torrent_name)
+            )
+            for index, raw_path, size in files:
+                path = normalize_minerva_path(raw_path)
+                parts = path.split("/")
+                title = parts[-1]
+                # BitTorrent v2 padding files are not real archive entries.
+                if not title or ".pad" in parts[:-1]:
+                    continue
+                directory = "/".join(parts[:-1])
+                directory_id = directories.get(directory)
+                if directory_id is None:
+                    directory_id = directories[directory] = len(directories) + 1
+                    connection.execute(
+                        "INSERT INTO directories(id, path) VALUES (?, ?)",
+                        (directory_id, directory),
+                    )
+                extension = catalog_extension(title)
+                entries += 1
+                file_batch.append(
+                    (
+                        entries,
+                        torrent_count,
+                        index,
+                        directory_id,
+                        title,
+                        extension,
+                        size,
+                        1 if catalog_kind(path, extension) == "game" else 0,
+                        FORMAT_GROUP_CODES[catalog_format_group(extension)],
+                    )
+                )
+                search_batch.append(
+                    (entries, catalog_title_search_text(title), catalog_parent_search_text(path))
+                )
+                if len(file_batch) >= 20000:
+                    flush()
+        flush()
+        built_at = now_ms()
+        connection.executemany(
+            "INSERT INTO catalog_meta(key, value) VALUES (?, ?)",
+            (
+                ("schema_version", str(CATALOG_SCHEMA_VERSION)),
+                ("entry_count", str(entries)),
+                ("torrent_count", str(torrent_count)),
+                ("built_at", str(built_at)),
+            ),
+        )
+        connection.execute("INSERT INTO files_fts(files_fts) VALUES ('optimize')")
+        connection.commit()
+        connection.execute("VACUUM")
+    finally:
+        connection.close()
+    return {"entries": entries, "torrents": torrent_count, "builtAt": built_at}
+
+
+def read_catalog_meta(database: Path) -> Optional[Dict[str, int]]:
+    """Return catalog metadata, or None if the file is not a usable catalog."""
+    if not database.is_file() or database.stat().st_size < 4096:
+        return None
+    try:
+        with closing(sqlite3.connect(database)) as connection:
+            meta = dict(connection.execute("SELECT key, value FROM catalog_meta").fetchall())
+        if int(meta.get("schema_version", 0)) != CATALOG_SCHEMA_VERSION:
+            return None
+        return {
+            "entries": int(meta.get("entry_count", 0)),
+            "builtAt": int(meta.get("built_at", 0)),
+        }
+    except (OSError, sqlite3.Error, ValueError):
+        return None
 
 
 class SearchIndex:
+    """Local catalog search. The catalog is downloaded once and refreshed weekly."""
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._remote_lock = threading.Lock()
-        self._remote_request = 0
-        self._remote_cache: OrderedDict[str, Tuple[float, list]] = OrderedDict()
-        self._index_file = CACHE_DIR / "index.txt.gz"
         self._database_file = CACHE_DIR / "catalog.sqlite3"
         self._checked = False
         self._ready = False
         self._loading = False
+        self._update_checked = False
         self._stage = "Not prepared"
         self._processed = 0
+        self._total = 0
         self._count = 0
-        self._loaded_at: Optional[int] = None
+        self._built_at: Optional[int] = None
         self._error: Optional[str] = None
+        self._failed_at = 0.0
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
             if not self._checked:
                 self._checked = True
-                if self._database_is_valid():
+                meta = read_catalog_meta(self._database_file)
+                if meta:
                     self._ready = True
                     self._stage = "Ready"
-                    self._count = self._database_count()
+                    self._count = meta["entries"]
+                    self._built_at = meta["builtAt"]
             return {
                 "loaded": self._ready,
                 "ready": self._ready,
                 "loading": self._loading,
                 "stage": self._stage,
                 "processed": self._processed,
+                "total": self._total,
                 "count": self._count,
-                "loadedAt": self._loaded_at,
+                "loadedAt": self._built_at,
                 "error": self._error,
                 "cacheFile": str(self._database_file),
             }
 
-    def _database_is_valid(self) -> bool:
-        if not self._database_file.exists() or self._database_file.stat().st_size < 4096:
-            return False
-        try:
-            with closing(sqlite3.connect(self._database_file)) as connection:
-                row = connection.execute(
-                    "SELECT value FROM catalog_meta WHERE key = 'schema_version'"
-                ).fetchone()
-                return bool(row and int(row[0]) == CATALOG_SCHEMA_VERSION)
-        except (OSError, sqlite3.Error, ValueError):
-            return False
-
-    def _database_count(self) -> int:
-        try:
-            with closing(sqlite3.connect(self._database_file)) as connection:
-                row = connection.execute(
-                    "SELECT value FROM catalog_meta WHERE key = 'entry_count'"
-                ).fetchone()
-                if not row:
-                    row = connection.execute("SELECT COUNT(*) FROM files").fetchone()
-                return int(row[0]) if row else 0
-        except (sqlite3.Error, ValueError):
-            return 0
-
     def ensure_started(self) -> bool:
-        if self.status()["ready"]:
-            return True
+        """Start a download if the catalog is missing or stale. Returns readiness."""
+        self.status()
         with self._lock:
-            if self._loading or self._error:
+            if self._loading:
+                return self._ready
+            if self._ready:
+                if self._update_checked:
+                    return True
+                self._update_checked = True
+                if self._built_at and now_ms() - self._built_at < CATALOG_MAX_AGE_MS:
+                    return True
+            elif self._error and time.monotonic() - self._failed_at < CATALOG_RETRY_SECONDS:
                 return False
             self._loading = True
-            self._stage = "Starting"
             self._error = None
-            threading.Thread(target=self._build_database, daemon=True).start()
-        return False
+            if not self._ready:
+                self._stage = "Checking for the game catalog"
+            threading.Thread(target=self._download_catalog, daemon=True).start()
+            return self._ready
 
-    def _set_progress(self, stage: str, processed: Optional[int] = None) -> None:
+    def _set_progress(self, stage: str, processed: int, total: int) -> None:
         with self._lock:
-            self._stage = stage
-            if processed is not None:
-                self._processed = processed
+            if not self._ready:
+                self._stage = stage
+            self._processed = processed
+            self._total = total
 
-    def _download_index(self) -> None:
-        temporary = self._index_file.with_suffix(".tmp")
-        self._set_progress("Downloading archive index")
-        request = Request(SEARCH_INDEX_URL, headers={"User-Agent": USER_AGENT})
-        with urlopen(request, timeout=120) as response, temporary.open("wb") as output:
-            shutil.copyfileobj(response, output)
-        temporary.replace(self._index_file)
-
-    def _build_database(self) -> None:
-        temporary_database = self._database_file.with_suffix(".sqlite3.tmp")
+    def _download_catalog(self) -> None:
+        temporary = self._database_file.with_name(self._database_file.name + ".download")
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            if not self._index_file.exists() or self._index_file.stat().st_size < 1024:
-                self._download_index()
-            if temporary_database.exists():
-                temporary_database.unlink()
-            if self._database_file.exists():
-                self._database_file.unlink()
+            manifest = json.loads(fetch_bytes(CATALOG_MANIFEST_URL, timeout=30))
+            if int(manifest["schema"]) != CATALOG_SCHEMA_VERSION:
+                raise RuntimeError("the published catalog needs a newer MiNERVA Deck")
+            with self._lock:
+                current = self._built_at if self._ready else None
+            if current is not None and int(manifest["builtAt"]) <= current:
+                return
 
-            self._set_progress("Preparing catalog", 0)
-            connection = sqlite3.connect(temporary_database)
-            try:
-                connection.execute("PRAGMA journal_mode=OFF")
-                connection.execute("PRAGMA synchronous=OFF")
-                connection.execute("PRAGMA temp_store=MEMORY")
-                connection.execute("PRAGMA cache_size=-32768")
-                connection.executescript(
-                    """
-                    CREATE TABLE files (
-                        id INTEGER PRIMARY KEY,
-                        directory_id INTEGER NOT NULL,
-                        title TEXT NOT NULL,
-                        extension TEXT NOT NULL,
-                        kind INTEGER NOT NULL,
-                        format_group INTEGER NOT NULL
-                    );
-                    CREATE TABLE directories (
-                        id INTEGER PRIMARY KEY,
-                        path TEXT NOT NULL UNIQUE
-                    );
-                    CREATE TABLE catalog_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-                    CREATE VIRTUAL TABLE files_fts USING fts5(
-                        title_terms,
-                        path_terms,
-                        content='',
-                        tokenize='unicode61 remove_diacritics 2'
-                    );
-                    """
-                )
+            size = int(manifest["size"])
+            digest = hashlib.sha256()
+            decompressor = lzma.LZMADecompressor()
+            received = 0
+            self._set_progress("Downloading the game catalog", 0, size)
+            request = Request(
+                f"{CATALOG_RELEASE_URL}/{quote(manifest['file'])}",
+                headers={"User-Agent": USER_AGENT},
+            )
+            with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
+                while chunk := response.read(1024 * 1024):
+                    digest.update(chunk)
+                    output.write(decompressor.decompress(chunk))
+                    received += len(chunk)
+                    self._set_progress("Downloading the game catalog", received, size)
+            if not decompressor.eof:
+                raise RuntimeError("the download was incomplete")
+            if digest.hexdigest() != str(manifest["sha256"]).lower():
+                raise RuntimeError("the download was corrupted")
+            meta = read_catalog_meta(temporary)
+            if not meta:
+                raise RuntimeError("the downloaded file is not a valid catalog")
 
-                file_batch: List[Tuple[int, int, str, str, int, int]] = []
-                search_batch: List[Tuple[int, str, str]] = []
-                directory_cache: Dict[str, int] = {}
-                processed = 0
-
-                def directory_id_for(path: str) -> int:
-                    cached = directory_cache.get(path)
-                    if cached is not None:
-                        return cached
-                    try:
-                        cursor = connection.execute(
-                            "INSERT INTO directories(path) VALUES (?)",
-                            (path,),
-                        )
-                        directory_id = int(cursor.lastrowid)
-                    except sqlite3.IntegrityError:
-                        row = connection.execute(
-                            "SELECT id FROM directories WHERE path = ?",
-                            (path,),
-                        ).fetchone()
-                        if not row:
-                            raise RuntimeError(f"Could not catalog directory: {path}")
-                        directory_id = int(row[0])
-                    if len(directory_cache) >= 200000:
-                        directory_cache.clear()
-                    directory_cache[path] = directory_id
-                    return directory_id
-
-                def flush_batches() -> None:
-                    if not file_batch:
-                        return
-                    connection.executemany(
-                        """
-                        INSERT INTO files (
-                            id, directory_id, title, extension, kind, format_group
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        file_batch,
-                    )
-                    connection.executemany(
-                        "INSERT INTO files_fts(rowid, title_terms, path_terms) VALUES (?, ?, ?)",
-                        search_batch,
-                    )
-                    file_batch.clear()
-                    search_batch.clear()
-
-                with gzip.open(self._index_file, "rt", encoding="utf-8", errors="replace") as handle:
-                    for raw_line in handle:
-                        original = raw_line.strip()
-                        if not original:
-                            continue
-                        normalized = normalize_minerva_path(original)
-                        parts = normalized.split("/")
-                        title = parts[-1] if parts else original
-                        directory_path = "/".join(parts[:-1])
-                        extension = catalog_extension(title)
-                        processed += 1
-                        file_batch.append(
-                            (
-                                processed,
-                                directory_id_for(directory_path),
-                                title,
-                                extension,
-                                1 if catalog_kind(normalized, extension) == "game" else 0,
-                                FORMAT_GROUP_CODES[catalog_format_group(extension)],
-                            )
-                        )
-                        search_batch.append(
-                            (
-                                processed,
-                                catalog_title_search_text(title),
-                                catalog_parent_search_text(normalized),
-                            )
-                        )
-                        if len(file_batch) >= 5000:
-                            flush_batches()
-                            if processed % 50000 == 0:
-                                connection.commit()
-                                self._set_progress("Organizing archive entries", processed)
-
-                flush_batches()
-                connection.commit()
-                self._set_progress("Creating fast search", processed)
-                connection.execute("CREATE INDEX files_kind_format ON files(kind, format_group)")
-                connection.executemany(
-                    "INSERT INTO catalog_meta(key, value) VALUES (?, ?)",
-                    (
-                        ("schema_version", str(CATALOG_SCHEMA_VERSION)),
-                        ("entry_count", str(processed)),
-                        ("built_at", str(now_ms())),
-                    ),
-                )
-                connection.commit()
-                connection.execute("PRAGMA optimize")
-            finally:
-                connection.close()
-
-            temporary_database.replace(self._database_file)
+            temporary.replace(self._database_file)
             with self._lock:
                 self._ready = True
-                self._count = processed
-                self._processed = processed
-                self._loaded_at = now_ms()
+                self._count = meta["entries"]
+                self._built_at = meta["builtAt"]
                 self._stage = "Ready"
                 self._error = None
         except Exception as exc:
             with self._lock:
-                self._error = str(exc)
-                self._stage = "Catalog preparation failed"
-            if temporary_database.exists():
-                temporary_database.unlink()
+                # A failed weekly refresh keeps the existing catalog silently.
+                if not self._ready:
+                    self._error = f"Could not download the game catalog: {exc}"
+                    self._stage = "Catalog download failed"
+                    self._failed_at = time.monotonic()
         finally:
+            temporary.unlink(missing_ok=True)
             with self._lock:
                 self._loading = False
-
-    def _search_remote(
-        self, query: str, limit: int, games_only: bool, format_group: str,
-    ) -> Dict[str, Any]:
-        query = query.strip().lower()
-        if len(query) < 3:
-            return {"results": [], "total": 0, "source": "remote"}
-        with self._lock:
-            self._remote_request += 1
-            request_id = self._remote_request
-        # MiNERVA's search API often takes 15-50 seconds. Requests are not
-        # serialized, so a slow superseded query never delays the newest one.
-        # Successful responses are cached briefly; failures are not cached.
-        with self._remote_lock:
-            cached = self._remote_cache.get(query)
-            if cached and time.monotonic() - cached[0] < REMOTE_CACHE_SECONDS:
-                self._remote_cache.move_to_end(query)
-                entries = cached[1]
-            else:
-                entries = None
-        if entries is None:
-            request = Request(
-                SEARCH_API_URL + "?" + urlencode({"query": query, "tokenised": "true"}),
-                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
-            )
-            try:
-                with urlopen(request, timeout=REMOTE_SEARCH_TIMEOUT_SECONDS) as response:
-                    entries = json.load(response)
-                if not isinstance(entries, list) or any(
-                    not isinstance(entry, dict) or not isinstance(entry.get("full_path"), str)
-                    for entry in entries
-                ):
-                    raise ValueError("Unexpected search response")
-            except Exception as exc:
-                raise RuntimeError(f"MiNERVA search is unavailable. Please try again. ({exc})") from exc
-            with self._remote_lock:
-                self._remote_cache[query] = (time.monotonic(), entries)
-                while len(self._remote_cache) > 32:
-                    self._remote_cache.popitem(last=False)
-        with self._lock:
-            if request_id != self._remote_request:
-                raise RuntimeError("Search superseded by a newer query")
-
-        results = []
-        seen = set()
-        for entry in entries:
-            path = normalize_minerva_path(entry["full_path"])
-            if not path or path in seen:
-                continue
-            seen.add(path)
-            parts = path.split("/")
-            title = parts[-1]
-            extension = catalog_extension(title)
-            kind = catalog_kind(path, extension)
-            group = catalog_format_group(extension)
-            if games_only and kind != "game":
-                continue
-            if format_group in {"archive", "disc", "rom", "package"} and group != format_group:
-                continue
-            route = emudeck_route_for_path(path)
-            section = parts[1] if len(parts) > 2 else ""
-            platform = route["system"] if route else section if useful_catalog_section(section) else "Unknown system"
-            results.append({
-                "path": path, "normalizedPath": path, "fileName": title,
-                "collection": parts[0] if len(parts) > 1 else "",
-                "system": platform, "platform": platform,
-                "region": region_for_title(title), "extension": extension,
-                "kind": kind, "formatGroup": group, "route": route,
-            })
-        results.sort(key=lambda result: remote_rank(result, query))
-        return {
-            "results": results[:limit], "total": min(len(results), limit),
-            "more": len(entries) > 100 or len(results) > limit, "source": "remote",
-        }
 
     def search(
         self,
@@ -478,10 +394,8 @@ class SearchIndex:
         games_only: bool = True,
         format_group: str = "",
     ) -> Optional[Dict[str, Any]]:
-        # The public bulk index was retired. Reuse an existing local catalog,
-        # but never start a multi-million-entry build during interactive search.
-        if not self.status()["ready"]:
-            return self._search_remote(query, limit, games_only, format_group)
+        if not self.ensure_started():
+            return None
 
         normalized_query = normalized_match_text(query)
         tokens = normalized_query.split()
@@ -513,38 +427,32 @@ class SearchIndex:
                 f"""
                 SELECT
                     d.path AS directory, f.title, f.extension,
-                    f.kind, f.format_group,
-                    bm25(files_fts, 9.0, 1.0) AS relevance
+                    f.kind, f.format_group, f.file_index, f.size,
+                    t.name AS torrent
                 FROM files_fts
                 JOIN files f ON f.id = files_fts.rowid
                 JOIN directories d ON d.id = f.directory_id
+                JOIN torrents t ON t.id = f.torrent_id
                 WHERE {where}
                 ORDER BY
                     CASE
-                        WHEN lower(substr(f.title, 1, length(f.title) - length(f.extension) - 1)) = ? THEN 0
+                        -- "Title.ext" and "Title (USA).ext" both count as exact.
+                        WHEN lower(substr(f.title, 1, length(f.title) - length(f.extension) - 1)) = ?
+                            OR lower(f.title) LIKE ? THEN 0
                         WHEN lower(f.title) LIKE ? THEN 1
                         ELSE 2
                     END,
                     CASE
                         WHEN lower(d.path) LIKE 'no-intro/%' THEN 0
-                        WHEN lower(d.path) LIKE 'retroachievements/%' THEN 1
-                        ELSE 2
+                        WHEN lower(d.path) LIKE 'redump/%' THEN 1
+                        WHEN lower(d.path) LIKE 'retroachievements/%' THEN 2
+                        ELSE 3
                     END,
-                    CASE
-                        WHEN lower(f.title) LIKE ? THEN length(f.title)
-                        ELSE 100000
-                    END,
-                    relevance,
                     length(f.title)
                 LIMIT ?
                 """,
                 parameters
-                + [
-                    normalized_query,
-                    normalized_query + "%",
-                    normalized_query + "%",
-                    limit,
-                ],
+                + [normalized_query, normalized_query + " (%", normalized_query + "%", limit * 2],
             ).fetchall()
 
         results: List[Dict[str, Any]] = []
@@ -580,12 +488,20 @@ class SearchIndex:
                     "kind": "game" if row["kind"] else "auxiliary",
                     "formatGroup": FORMAT_GROUP_NAMES.get(row["format_group"], ""),
                     "route": route,
+                    "torrentUrl": TORRENT_LIST_URL + quote(row["torrent"]),
+                    "fileIndex": int(row["file_index"]) + 1,
+                    "sizeBytes": int(row["size"]),
+                    "size": format_bytes(int(row["size"])),
                 }
             )
+            if len(results) >= limit:
+                break
 
+        total = int(total_row[0]) if total_row else 0
         return {
             "results": results,
-            "total": int(total_row[0]) if total_row else 0,
+            "total": total,
+            "more": total > len(results),
             "indexing": self.status(),
         }
 

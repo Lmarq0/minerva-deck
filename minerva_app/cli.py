@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 
+from .catalog import SEARCH_INDEX
 from .config import APP_NAME, DATA_DIR, DEFAULT_PORT, PUBLIC_ROOT, ensure_dirs
 from .downloader import torrent_engine_status
 from .server import create_server
@@ -15,6 +16,7 @@ from .storage import archive_engine_status
 def run_server(host: str, port: int) -> int:
     ensure_dirs()
     server = create_server(host, port, desktop_runtime=False)
+    SEARCH_INDEX.ensure_started()
     actual_port = server.server_address[1]
     print(f"{APP_NAME} server running at http://{host}:{actual_port}")
     print(f"Data directory: {DATA_DIR}")
