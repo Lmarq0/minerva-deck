@@ -48,6 +48,7 @@ rm -rf "$PWD/build/deck" "$PWD/build/AppDir"
   --mode=standalone \
   --assume-yes-for-downloads \
   --enable-plugin=pyside6 \
+  --include-qt-plugins=sensible,platformthemes \
   --user-package-configuration-file=packaging/nuitka-package.config.yml \
   --output-dir="$PWD/build/deck" \
   --output-filename=minerva-deck \

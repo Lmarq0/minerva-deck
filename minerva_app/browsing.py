@@ -1,14 +1,16 @@
-"""Safe filesystem browsing for destination selection."""
+"""Validate folders chosen in the system folder dialog."""
 
 from __future__ import annotations
 
-import os
-import string
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Callable, Dict, Optional
 
 from .config import default_destination
 from .routes import validate_emudeck_subfolder
+
+
+# Opens the system folder dialog: (title, start folder) -> chosen path or "".
+FolderPicker = Callable[[str, str], str]
 
 
 def closest_existing_dir(path: Path) -> Path:
@@ -22,67 +24,25 @@ def closest_existing_dir(path: Path) -> Path:
     return Path.home()
 
 
-def directory_entries(path: Path) -> List[Dict[str, str]]:
-    entries: List[Dict[str, str]] = []
-    try:
-        children = sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
-    except OSError:
-        return entries
-    for child in children:
-        if child.is_dir():
-            entries.append({"name": child.name, "path": str(child)})
-    return entries
+def pick_folder_payload(
+    picker: FolderPicker, mode: str, root_value: str, current_value: str
+) -> Dict[str, Optional[str]]:
+    """Run the picker for the ROMs root or a system subfolder inside it."""
+    root = closest_existing_dir(Path(root_value or default_destination()))
+    if mode == "root":
+        chosen = picker("Choose your EmuDeck ROMs folder", str(root))
+        return {"path": chosen or None}
+    if mode != "subfolder":
+        raise RuntimeError("Unknown folder picker mode")
 
-
-def browse_root_payload(path_value: str = "") -> Dict[str, Any]:
-    if os.name == "nt" and not path_value:
-        drives = []
-        for letter in string.ascii_uppercase:
-            drive = Path(f"{letter}:\\")
-            if drive.exists():
-                drives.append({"name": f"{letter}:\\", "path": str(drive)})
-        return {"mode": "root", "current": "", "parent": None, "entries": drives}
-
-    current = closest_existing_dir(Path(path_value or default_destination()))
-    parent = str(current.parent) if current != current.parent else None
-    return {
-        "mode": "root",
-        "current": str(current),
-        "parent": parent,
-        "entries": directory_entries(current),
-    }
-
-
-def browse_subfolder_payload(root_value: str, relative_value: str = "") -> Dict[str, Any]:
-    root = closest_existing_dir(Path(root_value or default_destination())).resolve()
-    if relative_value.strip():
-        relative = validate_emudeck_subfolder(relative_value)
-        current = (root / Path(*relative.split("/"))).resolve()
-    else:
-        current = root
-
-    if root != current and root not in current.parents:
-        raise RuntimeError("Subfolder browser cannot leave the ROMs root")
-    current = closest_existing_dir(current).resolve()
-    if root != current and root not in current.parents:
-        current = root
-
-    relative_current = "" if current == root else current.relative_to(root).as_posix()
-    parent = None
-    if current != root:
-        parent_path = current.parent
-        parent = "" if parent_path == root else parent_path.relative_to(root).as_posix()
-
-    entries = []
-    for entry in directory_entries(current):
-        entry_path = Path(entry["path"]).resolve()
-        entry["path"] = entry_path.relative_to(root).as_posix()
-        entries.append(entry)
-
-    return {
-        "mode": "subfolder",
-        "root": str(root),
-        "current": relative_current,
-        "parent": parent,
-        "entries": entries,
-    }
+    start = root
+    if current_value.strip():
+        start = closest_existing_dir(root / Path(*validate_emudeck_subfolder(current_value).split("/")))
+    chosen = picker("Choose the system folder", str(start))
+    if not chosen:
+        return {"path": None}
+    resolved_root = root.resolve()
+    resolved = Path(chosen).resolve()
+    if resolved == resolved_root or resolved_root not in resolved.parents:
+        raise RuntimeError(f"Choose a folder inside {resolved_root}")
+    return {"path": validate_emudeck_subfolder(resolved.relative_to(resolved_root).as_posix())}

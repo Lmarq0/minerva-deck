@@ -63,6 +63,19 @@ def torrent_engine_status() -> dict:
     }
 
 
+# libtorrent refuses .torrent files over 10 MB by default, but MiNERVA's
+# largest (Redump Xbox 360, PlayStation 2, MAME extras) are 10-30 MB.
+TORRENT_LOAD_LIMITS = {
+    "max_buffer_size": 256 * 1024 * 1024,
+    "max_pieces": 0x800000,
+    "max_decode_tokens": 100_000_000,
+}
+
+
+def load_torrent_info(torrent_path: Path):
+    return _libtorrent().torrent_info(str(torrent_path), TORRENT_LOAD_LIMITS)
+
+
 def selected_file_priorities(file_count: int, selected_index: int) -> List[int]:
     if file_count <= 0:
         raise RuntimeError("Torrent contains no files")
@@ -116,7 +129,7 @@ def download_selected(
 ) -> Path:
     lt = _libtorrent()
     destination.mkdir(parents=True, exist_ok=True)
-    torrent_info = lt.torrent_info(str(selection.torrent_path))
+    torrent_info = load_torrent_info(selection.torrent_path)
     validate_selection(torrent_info, selection)
 
     params = lt.add_torrent_params()

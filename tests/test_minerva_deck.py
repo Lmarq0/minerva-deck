@@ -18,8 +18,10 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from minerva_app import (
+    browsing,
     catalog,
     config,
+    covers,
     desktop,
     downloader,
     jobs,
@@ -169,9 +171,14 @@ class SearchIndexTest(unittest.TestCase):
                 result = index.search("super mario world")
                 assert result is not None
                 self.assertEqual(result["total"], 1)
-                item = result["results"][0]
+                game = result["results"][0]
+                self.assertEqual(game["title"], "Super Mario World")
+                self.assertEqual(game["platform"], "Nintendo Super Nintendo")
+                self.assertTrue(game["verified"])
+                self.assertEqual(game["coverSystem"], "Nintendo - Super Nintendo Entertainment System")
+                item = game["variants"][0]
                 self.assertEqual(item["fileName"], "Super Mario World (USA).sfc")
-                self.assertEqual(item["platform"], "Nintendo Super Nintendo")
+                self.assertEqual(item["label"], "USA")
                 self.assertEqual(item["fileIndex"], 1)
                 self.assertEqual(item["sizeBytes"], 524288)
                 self.assertEqual(
@@ -185,6 +192,28 @@ class SearchIndexTest(unittest.TestCase):
                 limited = index.search("fixture game", limit=5)
                 self.assertEqual(len(limited["results"]), 5)
                 self.assertTrue(limited["more"])
+
+    def test_versions_are_grouped_with_official_releases_first(self) -> None:
+        folder_name = "No-Intro/Nintendo - Game Boy Advance"
+        fixture = [(
+            "Minerva_Myrient - No-Intro - Nintendo - Game Boy Advance.torrent",
+            [
+                (0, f"{folder_name}/Metroid Fusion (Japan).gba", 1),
+                (1, f"{folder_name}/Metroid Fusion (USA) (Beta).gba", 1),
+                (2, f"{folder_name}/Metroid Fusion (Europe) (En,Fr,De,Es,It).gba", 1),
+                (3, f"{folder_name}/Metroid Fusion (USA).gba", 1),
+            ],
+        )]
+        with tempfile.TemporaryDirectory() as folder:
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "catalog.sqlite3"
+            catalog.build_catalog(index._database_file, fixture)
+            games = index.search("metroid fusion")["results"]
+        self.assertEqual(len(games), 1)
+        self.assertEqual(
+            [variant["label"] for variant in games[0]["variants"]],
+            ["USA", "Europe · En,Fr,De,Es,It", "Japan", "USA · Beta"],
+        )
 
     def test_missing_catalog_is_downloaded_and_verified(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -293,6 +322,111 @@ class CertificateTest(unittest.TestCase):
                 mock.patch.object(utils.ssl, "get_default_verify_paths", self.missing_defaults):
             utils.configure_ca_certificates()
             self.assertEqual(utils.os.environ["SSL_CERT_FILE"], "/custom.pem")
+class FolderPickerTest(unittest.TestCase):
+    def test_root_mode_returns_the_chosen_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            picker = mock.Mock(return_value=folder)
+            result = browsing.pick_folder_payload(picker, "root", folder, "")
+            self.assertEqual(result, {"path": folder})
+            picker.assert_called_once_with("Choose your EmuDeck ROMs folder", folder)
+
+    def test_cancelled_dialog_returns_no_path(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            picker = mock.Mock(return_value="")
+            self.assertEqual(browsing.pick_folder_payload(picker, "root", folder, "")["path"], None)
+            self.assertEqual(browsing.pick_folder_payload(picker, "subfolder", folder, "")["path"], None)
+
+    def test_subfolder_mode_returns_a_path_relative_to_the_root(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "wiiu" / "roms").mkdir(parents=True)
+            picker = mock.Mock(return_value=str(root / "wiiu" / "roms"))
+            result = browsing.pick_folder_payload(picker, "subfolder", folder, "wiiu")
+            self.assertEqual(result, {"path": "wiiu/roms"})
+            self.assertEqual(picker.call_args.args[1], str(root / "wiiu"))
+
+    def test_subfolder_outside_the_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as other:
+            for chosen in (other, folder):
+                picker = mock.Mock(return_value=chosen)
+                with self.assertRaisesRegex(RuntimeError, "Choose a folder inside"):
+                    browsing.pick_folder_payload(picker, "subfolder", folder, "")
+
+    def test_endpoint_requires_the_desktop_dialog(self) -> None:
+        for picker, expected in ((None, 501), (lambda title, start: "/tmp", 200)):
+            httpd = server.create_server(session_token="token", folder_picker=picker)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = Request(
+                    f"http://127.0.0.1:{httpd.server_address[1]}/api/pick-folder",
+                    data=json.dumps({"mode": "root", "root": "/tmp"}).encode(),
+                    headers={"X-Minerva-Session": "token", "Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urlopen(request, timeout=5) as response:
+                        status, body = response.status, json.load(response)
+                except HTTPError as error:
+                    status, body = error.code, json.load(error)
+                self.assertEqual(status, expected)
+                if expected == 200:
+                    self.assertEqual(body, {"path": "/tmp"})
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
+
+class CoverTest(unittest.TestCase):
+    def test_lookup_falls_back_to_base_system_and_region_title(self) -> None:
+        self.assertEqual(
+            covers.system_candidates("Sony - PlayStation (PS one Classics) (PSN)"),
+            ["Sony - PlayStation (PS one Classics) (PSN)", "Sony - PlayStation"],
+        )
+        self.assertEqual(
+            covers.title_candidates("Game (USA) (Virtual Console)"),
+            ["Game (USA) (Virtual Console)", "Game (USA)", "Game"],
+        )
+        self.assertEqual(covers.libretro_name("Q*bert: Arcade"), "Q_bert_ Arcade")
+
+    def test_covers_are_cached_and_misses_remembered(self) -> None:
+        def not_found(url, timeout):
+            raise HTTPError(url, 404, "Not Found", {}, None)
+
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(covers, "COVER_DIR", Path(folder)):
+            with mock.patch.object(covers, "fetch_bytes", return_value=b"png") as fetch:
+                self.assertEqual(covers.cover_image("System", "Game (USA)"), b"png")
+                self.assertEqual(covers.cover_image("System", "Game (USA)"), b"png")
+                fetch.assert_called_once()
+            with mock.patch.object(covers, "fetch_bytes", side_effect=not_found) as fetch:
+                self.assertIsNone(covers.cover_image("System", "Missing (USA)"))
+                calls = fetch.call_count
+                self.assertIsNone(covers.cover_image("System", "Missing (USA)"))
+                self.assertEqual(fetch.call_count, calls)
+            with mock.patch.object(covers, "fetch_bytes", side_effect=OSError("offline")):
+                self.assertIsNone(covers.cover_image("System", "Offline (USA)"))
+            self.assertEqual(len(list(Path(folder).glob("*.miss"))), 1)
+
+
+class JobCleanupTest(unittest.TestCase):
+    def test_job_folders_are_removed_after_jobs_and_at_worker_start(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            job_dir = Path(folder)
+            (job_dir / "stale" / "download").mkdir(parents=True)
+            (job_dir / "history.json").write_text("{}")
+            with mock.patch.object(jobs, "JOB_DIR", job_dir):
+                jobs.remove_stale_job_directories()
+                self.assertEqual([path.name for path in job_dir.iterdir()], ["history.json"])
+
+                job_id = "failing"
+                fake_job = {"payload": {"fullPath": "No-Intro/System/Game.zip", "romsRoot": folder}}
+                with mock.patch.object(jobs.JOBS, "get", return_value=fake_job), \
+                        mock.patch.object(jobs.JOBS, "update"), mock.patch.object(jobs.JOBS, "log"), \
+                        mock.patch.object(jobs.JOBS, "cancel_event", return_value=threading.Event()), \
+                        mock.patch.object(jobs, "resolve_torrent_selection", side_effect=RuntimeError("boom")):
+                    jobs.run_download_job(job_id)
+                self.assertFalse((job_dir / job_id).exists())
 
 
 class PathSafetyTest(unittest.TestCase):
@@ -381,6 +515,24 @@ class TorrentSelectionTest(unittest.TestCase):
         selection.file.path = "different.bin"
         with self.assertRaises(RuntimeError):
             downloader.validate_selection(FakeTorrentInfo(), selection)
+
+    @unittest.skipUnless(
+        downloader.torrent_engine_status()["ready"],
+        "libtorrent runtime is not installed",
+    )
+    def test_torrents_larger_than_ten_megabytes_load(self) -> None:
+        # Redump's Xbox 360 torrent is 10,003,465 bytes, just over libtorrent's default limit.
+        pieces = 640_000
+        info = (
+            b"d6:lengthi" + str(pieces * 16384).encode() + b"e4:name8:big.file"
+            b"12:piece lengthi16384e6:pieces" + str(pieces * 20).encode() + b":"
+            + b"\x00" * (pieces * 20) + b"e"
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            torrent = Path(folder) / "large.torrent"
+            torrent.write_bytes(b"d4:info" + info + b"e")
+            self.assertGreater(torrent.stat().st_size, 10_000_000)
+            self.assertEqual(downloader.load_torrent_info(torrent).num_pieces(), pieces)
 
     @unittest.skipUnless(
         downloader.torrent_engine_status()["ready"],
@@ -507,10 +659,8 @@ class ServerSecurityTest(unittest.TestCase):
             with urlopen(base, timeout=2) as response:
                 html = response.read().decode("utf-8")
             self.assertIn(token, html)
-            self.assertIn(
-                "Download on the main folder (not recommended using Emudeck)",
-                html,
-            )
+            # Saving outside EmuDeck's system folders must stay possible.
+            self.assertIn('id="rootFallbackToggle"', html)
         finally:
             httpd.shutdown()
             httpd.server_close()
@@ -595,7 +745,7 @@ class FrontendStructureTest(unittest.TestCase):
         javascript = (project_root / "public" / "static" / "app.js").read_text("utf-8")
 
         self.assertIn('id="downloadsDialog"', html)
-        self.assertIn('class="downloads-overlay"', html)
+        self.assertIn('id="downloadsDialog" class="overlay"', html)
         self.assertNotIn('<dialog id="downloadsDialog"', html)
         self.assertNotIn("downloadsDialog.showModal()", javascript)
         self.assertNotIn("downloadsDialog.open", javascript)

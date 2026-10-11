@@ -27,6 +27,7 @@ INSTANCE_NAME = "minerva-deck-desktop"
 STARTUP_TIMEOUT_SECONDS = 60.0
 STARTUP_REQUEST_TIMEOUT_SECONDS = 30.0
 STARTUP_LOG_NAME = "startup.log"
+BUNDLED_QT_THEMES = {"xdgdesktopportal", "gtk3"}
 
 
 def _wait_until_ready(
@@ -120,7 +121,7 @@ def run_desktop(*, devtools: bool = False) -> int:
 
 def _run_desktop(*, devtools: bool = False) -> int:
     try:
-        from PySide6.QtCore import QSettings, Qt, QUrl
+        from PySide6.QtCore import QObject, QSettings, Qt, QUrl, Signal
         from PySide6.QtGui import (
             QAction,
             QCloseEvent,
@@ -136,6 +137,7 @@ def _run_desktop(*, devtools: bool = False) -> int:
         from PySide6.QtWidgets import (
             QApplication,
             QDialog,
+            QFileDialog,
             QMainWindow,
             QMessageBox,
             QPushButton,
@@ -160,6 +162,28 @@ def _run_desktop(*, devtools: bool = False) -> int:
                     url.port() == self.allowed_port
                 )
             return url.scheme() in {"about", "data"}
+
+    class FolderDialogBridge(QObject):
+        """Open the system folder dialog on the GUI thread for API threads."""
+
+        requested = Signal(str, str, object)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.window = None
+            self.requested.connect(self._open)
+
+        def _open(self, title: str, start: str, reply: dict) -> None:
+            try:
+                reply["path"] = QFileDialog.getExistingDirectory(self.window, title, start)
+            finally:
+                reply["done"].set()
+
+        def pick(self, title: str, start: str) -> str:
+            reply = {"path": "", "done": threading.Event()}
+            self.requested.emit(title, start, reply)
+            reply["done"].wait()
+            return reply["path"]
 
     class DesktopWindow(QMainWindow):
         def __init__(
@@ -290,6 +314,12 @@ def _run_desktop(*, devtools: bool = False) -> int:
             event.accept()
 
     ensure_dirs()
+    if sys.platform.startswith("linux") and (
+        os.environ.get("QT_QPA_PLATFORMTHEME") not in BUNDLED_QT_THEMES
+    ):
+        # Use the desktop's own file dialogs (KDE on Steam Deck) via the XDG
+        # portal; the bundled Qt cannot load the system's "kde" theme plugin.
+        os.environ["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal"
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("MiNERVA")
@@ -353,11 +383,13 @@ def _run_desktop(*, devtools: bool = False) -> int:
     app.processEvents()
 
     token = secrets.token_urlsafe(32)
+    folder_dialog = FolderDialogBridge()
     server = create_server(
         "127.0.0.1",
         0,
         desktop_runtime=True,
         session_token=token,
+        folder_picker=folder_dialog.pick,
     )
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
@@ -378,6 +410,7 @@ def _run_desktop(*, devtools: bool = False) -> int:
         )
         app.processEvents()
         window = DesktopWindow(url, port, shutdown)
+        folder_dialog.window = window
 
         def activate_existing() -> None:
             socket = instance_server.nextPendingConnection()

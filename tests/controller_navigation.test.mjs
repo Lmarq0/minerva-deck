@@ -28,6 +28,9 @@ function harness() {
     onDirection: (direction) => events.push(direction),
     onAccept: () => events.push("accept"),
     onCancel: () => events.push("cancel"),
+    onSearch: () => events.push("search"),
+    onPrevious: () => events.push("previous"),
+    onNext: () => events.push("next"),
     now: () => now,
   });
   return {
@@ -166,4 +169,15 @@ test("poller sleeps without standard controllers and stops on focus loss", async
   assert.equal(samples, 3);
   poller.stop();
   assert.equal(pending, null);
+});
+
+test("Y, L1, and R1 fire once per press", () => {
+  const { input, events } = harness();
+  input.poll([gamepad()]);
+  for (const button of [3, 4, 5]) {
+    input.poll([gamepad({ pressed: [button] })]);
+    input.poll([gamepad({ pressed: [button] })]);
+    input.poll([gamepad()]);
+  }
+  assert.deepEqual(events, ["search", "previous", "next"]);
 });
