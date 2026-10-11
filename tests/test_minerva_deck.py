@@ -409,6 +409,26 @@ class CoverTest(unittest.TestCase):
             self.assertEqual(len(list(Path(folder).glob("*.miss"))), 1)
 
 
+class JobCleanupTest(unittest.TestCase):
+    def test_job_folders_are_removed_after_jobs_and_at_worker_start(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            job_dir = Path(folder)
+            (job_dir / "stale" / "download").mkdir(parents=True)
+            (job_dir / "history.json").write_text("{}")
+            with mock.patch.object(jobs, "JOB_DIR", job_dir):
+                jobs.remove_stale_job_directories()
+                self.assertEqual([path.name for path in job_dir.iterdir()], ["history.json"])
+
+                job_id = "failing"
+                fake_job = {"payload": {"fullPath": "No-Intro/System/Game.zip", "romsRoot": folder}}
+                with mock.patch.object(jobs.JOBS, "get", return_value=fake_job), \
+                        mock.patch.object(jobs.JOBS, "update"), mock.patch.object(jobs.JOBS, "log"), \
+                        mock.patch.object(jobs.JOBS, "cancel_event", return_value=threading.Event()), \
+                        mock.patch.object(jobs, "resolve_torrent_selection", side_effect=RuntimeError("boom")):
+                    jobs.run_download_job(job_id)
+                self.assertFalse((job_dir / job_id).exists())
+
+
 class PathSafetyTest(unittest.TestCase):
     def test_subfolder_validation(self) -> None:
         self.assertEqual(routes.validate_emudeck_subfolder("wiiu/roms"), "wiiu/roms")

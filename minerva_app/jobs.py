@@ -272,7 +272,16 @@ class JobStore:
 JOBS = JobStore()
 
 
+def remove_stale_job_directories() -> None:
+    # Only one worker runs, so folders left from earlier sessions are unused.
+    if JOB_DIR.is_dir():
+        for path in JOB_DIR.iterdir():
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+
+
 def download_worker_loop() -> None:
+    remove_stale_job_directories()
     while True:
         job_id = JOBS.next_queued()
         if not job_id:
@@ -396,3 +405,7 @@ def run_download_job(job_id: str) -> None:
             peers=0,
         )
         JOBS.log(job_id, str(exc))
+    finally:
+        # Placed files were moved out already; the rest is the torrent file
+        # and fragments of neighbouring files that share pieces.
+        shutil.rmtree(work_directory, ignore_errors=True)
