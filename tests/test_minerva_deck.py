@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import lzma
+import ssl
 import tempfile
 import threading
 import time
@@ -26,6 +27,7 @@ from minerva_app import (
     server,
     storage,
     torrents,
+    utils,
 )
 
 
@@ -263,6 +265,34 @@ class SearchIndexTest(unittest.TestCase):
             "Minerva_Myrient%20-%20No-Intro%20-%20Nintendo%20-%20Game%20Boy%20Advance.torrent",
         )
         self.assertFalse(any("/torrents/" in url for url in urls))
+
+
+class CertificateTest(unittest.TestCase):
+    def missing_defaults(self):
+        return ssl.DefaultVerifyPaths(None, None, "SSL_CERT_FILE", "/usr/lib/ssl/cert.pem",
+                                      "SSL_CERT_DIR", "/usr/lib/ssl/certs")
+
+    def test_host_bundle_is_used_when_built_in_paths_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = Path(folder) / "ca-certificates.crt"
+            bundle.write_text("certs")
+            with mock.patch.dict(utils.os.environ, {}, clear=True), \
+                    mock.patch.object(utils.sys, "platform", "linux"), \
+                    mock.patch.object(utils.ssl, "get_default_verify_paths", self.missing_defaults), \
+                    mock.patch.object(utils, "CA_BUNDLE_CANDIDATES", ("/missing.crt", str(bundle))):
+                utils.configure_ca_certificates()
+                self.assertEqual(utils.os.environ.get("SSL_CERT_FILE"), str(bundle))
+
+    def test_working_defaults_and_user_settings_are_left_alone(self) -> None:
+        with mock.patch.dict(utils.os.environ, {}, clear=True), \
+                mock.patch.object(utils.sys, "platform", "linux"):
+            utils.configure_ca_certificates()  # this machine's defaults work
+            self.assertNotIn("SSL_CERT_FILE", utils.os.environ)
+        with mock.patch.dict(utils.os.environ, {"SSL_CERT_FILE": "/custom.pem"}, clear=True), \
+                mock.patch.object(utils.sys, "platform", "linux"), \
+                mock.patch.object(utils.ssl, "get_default_verify_paths", self.missing_defaults):
+            utils.configure_ca_certificates()
+            self.assertEqual(utils.os.environ["SSL_CERT_FILE"], "/custom.pem")
 
 
 class PathSafetyTest(unittest.TestCase):
