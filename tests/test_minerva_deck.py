@@ -21,6 +21,7 @@ from minerva_app import (
     browsing,
     catalog,
     config,
+    covers,
     desktop,
     downloader,
     jobs,
@@ -170,9 +171,14 @@ class SearchIndexTest(unittest.TestCase):
                 result = index.search("super mario world")
                 assert result is not None
                 self.assertEqual(result["total"], 1)
-                item = result["results"][0]
+                game = result["results"][0]
+                self.assertEqual(game["title"], "Super Mario World")
+                self.assertEqual(game["platform"], "Nintendo Super Nintendo")
+                self.assertTrue(game["verified"])
+                self.assertEqual(game["coverSystem"], "Nintendo - Super Nintendo Entertainment System")
+                item = game["variants"][0]
                 self.assertEqual(item["fileName"], "Super Mario World (USA).sfc")
-                self.assertEqual(item["platform"], "Nintendo Super Nintendo")
+                self.assertEqual(item["label"], "USA")
                 self.assertEqual(item["fileIndex"], 1)
                 self.assertEqual(item["sizeBytes"], 524288)
                 self.assertEqual(
@@ -186,6 +192,28 @@ class SearchIndexTest(unittest.TestCase):
                 limited = index.search("fixture game", limit=5)
                 self.assertEqual(len(limited["results"]), 5)
                 self.assertTrue(limited["more"])
+
+    def test_versions_are_grouped_with_official_releases_first(self) -> None:
+        folder_name = "No-Intro/Nintendo - Game Boy Advance"
+        fixture = [(
+            "Minerva_Myrient - No-Intro - Nintendo - Game Boy Advance.torrent",
+            [
+                (0, f"{folder_name}/Metroid Fusion (Japan).gba", 1),
+                (1, f"{folder_name}/Metroid Fusion (USA) (Beta).gba", 1),
+                (2, f"{folder_name}/Metroid Fusion (Europe) (En,Fr,De,Es,It).gba", 1),
+                (3, f"{folder_name}/Metroid Fusion (USA).gba", 1),
+            ],
+        )]
+        with tempfile.TemporaryDirectory() as folder:
+            index = catalog.SearchIndex()
+            index._database_file = Path(folder) / "catalog.sqlite3"
+            catalog.build_catalog(index._database_file, fixture)
+            games = index.search("metroid fusion")["results"]
+        self.assertEqual(len(games), 1)
+        self.assertEqual(
+            [variant["label"] for variant in games[0]["variants"]],
+            ["USA", "Europe · En,Fr,De,Es,It", "Japan", "USA · Beta"],
+        )
 
     def test_missing_catalog_is_downloaded_and_verified(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -347,6 +375,38 @@ class FolderPickerTest(unittest.TestCase):
             finally:
                 httpd.shutdown()
                 httpd.server_close()
+
+
+class CoverTest(unittest.TestCase):
+    def test_lookup_falls_back_to_base_system_and_region_title(self) -> None:
+        self.assertEqual(
+            covers.system_candidates("Sony - PlayStation (PS one Classics) (PSN)"),
+            ["Sony - PlayStation (PS one Classics) (PSN)", "Sony - PlayStation"],
+        )
+        self.assertEqual(
+            covers.title_candidates("Game (USA) (Virtual Console)"),
+            ["Game (USA) (Virtual Console)", "Game (USA)", "Game"],
+        )
+        self.assertEqual(covers.libretro_name("Q*bert: Arcade"), "Q_bert_ Arcade")
+
+    def test_covers_are_cached_and_misses_remembered(self) -> None:
+        def not_found(url, timeout):
+            raise HTTPError(url, 404, "Not Found", {}, None)
+
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(covers, "COVER_DIR", Path(folder)):
+            with mock.patch.object(covers, "fetch_bytes", return_value=b"png") as fetch:
+                self.assertEqual(covers.cover_image("System", "Game (USA)"), b"png")
+                self.assertEqual(covers.cover_image("System", "Game (USA)"), b"png")
+                fetch.assert_called_once()
+            with mock.patch.object(covers, "fetch_bytes", side_effect=not_found) as fetch:
+                self.assertIsNone(covers.cover_image("System", "Missing (USA)"))
+                calls = fetch.call_count
+                self.assertIsNone(covers.cover_image("System", "Missing (USA)"))
+                self.assertEqual(fetch.call_count, calls)
+            with mock.patch.object(covers, "fetch_bytes", side_effect=OSError("offline")):
+                self.assertIsNone(covers.cover_image("System", "Offline (USA)"))
+            self.assertEqual(len(list(Path(folder).glob("*.miss"))), 1)
 
 
 class PathSafetyTest(unittest.TestCase):
@@ -561,10 +621,8 @@ class ServerSecurityTest(unittest.TestCase):
             with urlopen(base, timeout=2) as response:
                 html = response.read().decode("utf-8")
             self.assertIn(token, html)
-            self.assertIn(
-                "Download on the main folder (not recommended using Emudeck)",
-                html,
-            )
+            # Saving outside EmuDeck's system folders must stay possible.
+            self.assertIn('id="rootFallbackToggle"', html)
         finally:
             httpd.shutdown()
             httpd.server_close()
@@ -649,7 +707,7 @@ class FrontendStructureTest(unittest.TestCase):
         javascript = (project_root / "public" / "static" / "app.js").read_text("utf-8")
 
         self.assertIn('id="downloadsDialog"', html)
-        self.assertIn('class="downloads-overlay"', html)
+        self.assertIn('id="downloadsDialog" class="overlay"', html)
         self.assertNotIn('<dialog id="downloadsDialog"', html)
         self.assertNotIn("downloadsDialog.showModal()", javascript)
         self.assertNotIn("downloadsDialog.open", javascript)

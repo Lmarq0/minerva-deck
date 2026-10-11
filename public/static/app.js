@@ -2,21 +2,21 @@ import { ControllerInput, createGamepadPoller } from "./controller.js";
 
 const state = {
   status: null,
-  selected: null,
-  selectedRoute: null,
-  selectedMetadata: null,
+  games: [],
+  systemFilter: "all",
+  selectedGame: null,
+  selectedVariant: null,
+  routeOverride: "",
   searchTimer: null,
   searchPollTimer: null,
+  searchRequest: 0,
+  searchAbort: null,
   pollTimer: null,
-  activeJobId: null,
   jobs: [],
+  activeJobId: null,
   selectedJobId: null,
   downloadsFilter: "all",
-  downloadsPreviousFocus: null,
-  searchRequest: 0,
-  selectionRequest: 0,
-  searchAbort: null,
-  selectionAbort: null,
+  overlayReturnFocus: null,
 };
 
 const sessionToken =
@@ -28,67 +28,60 @@ function apiFetch(url, options = {}) {
   return fetch(url, { ...options, headers });
 }
 
+const byId = (id) => document.getElementById(id);
 const elements = {
-  setupStatus: document.getElementById("setupStatus"),
-  setupStatusText: document.getElementById("setupStatusText"),
-  setupBanner: document.getElementById("setupBanner"),
-  setupBannerText: document.getElementById("setupBannerText"),
-  dismissSetupButton: document.getElementById("dismissSetupButton"),
-  downloadsButton: document.getElementById("downloadsButton"),
-  queueBadge: document.getElementById("queueBadge"),
-  query: document.getElementById("query"),
-  gamesOnlyToggle: document.getElementById("gamesOnlyToggle"),
-  formatFilter: document.getElementById("formatFilter"),
-  searchCount: document.getElementById("searchCount"),
-  results: document.getElementById("results"),
-  selectionEmpty: document.getElementById("selectionEmpty"),
-  selectionCard: document.getElementById("selectionCard"),
-  clearButton: document.getElementById("clearButton"),
-  platformBadge: document.getElementById("platformBadge"),
-  selectedCollection: document.getElementById("selectedCollection"),
-  selectedName: document.getElementById("selectedName"),
-  selectedPath: document.getElementById("selectedPath"),
-  regionFact: document.getElementById("regionFact"),
-  formatFact: document.getElementById("formatFact"),
-  sizeFact: document.getElementById("sizeFact"),
-  destinationSummary: document.getElementById("destinationSummary"),
-  destinationHint: document.getElementById("destinationHint"),
-  routeStatus: document.getElementById("routeStatus"),
-  advancedOptions: document.getElementById("advancedOptions"),
-  destination: document.getElementById("destination"),
-  defaultDirButton: document.getElementById("defaultDirButton"),
-  browseRootButton: document.getElementById("browseRootButton"),
-  routeOverride: document.getElementById("routeOverride"),
-  autoRouteButton: document.getElementById("autoRouteButton"),
-  browseSubfolderButton: document.getElementById("browseSubfolderButton"),
-  extractToggle: document.getElementById("extractToggle"),
-  rootFallbackToggle: document.getElementById("rootFallbackToggle"),
-  legalConfirm: document.getElementById("legalConfirm"),
-  downloadButton: document.getElementById("downloadButton"),
-  downloadButtonLabel: document.getElementById("downloadButtonLabel"),
-  downloadHelp: document.getElementById("downloadHelp"),
-  activityDock: document.getElementById("activityDock"),
-  activitySummary: document.getElementById("activitySummary"),
-  activityDrawer: document.getElementById("activityDrawer"),
-  activityIcon: document.getElementById("activityIcon"),
-  activityDetail: document.getElementById("activityDetail"),
-  jobStage: document.getElementById("jobStage"),
-  jobPercent: document.getElementById("jobPercent"),
-  progressTrack: document.getElementById("progressTrack"),
-  progressBar: document.getElementById("progressBar"),
-  queueList: document.getElementById("queueList"),
-  outputs: document.getElementById("outputs"),
-  jobLog: document.getElementById("jobLog"),
-  downloadsDialog: document.getElementById("downloadsDialog"),
-  downloadsCloseButton: document.getElementById("downloadsCloseButton"),
-  downloadsRefreshButton: document.getElementById("downloadsRefreshButton"),
-  downloadsActiveCount: document.getElementById("downloadsActiveCount"),
-  downloadsCompletedCount: document.getElementById("downloadsCompletedCount"),
-  downloadsIssueCount: document.getElementById("downloadsIssueCount"),
-  downloadsList: document.getElementById("downloadsList"),
-  downloadsDetail: document.getElementById("downloadsDetail"),
-  downloadFilters: Array.from(document.querySelectorAll("[data-download-filter]")),
+  query: byId("query"),
+  clearQueryButton: byId("clearQueryButton"),
+  settingsButton: byId("settingsButton"),
+  downloadsButton: byId("downloadsButton"),
+  queueBadge: byId("queueBadge"),
+  setupBanner: byId("setupBanner"),
+  setupBannerText: byId("setupBannerText"),
+  dismissSetupButton: byId("dismissSetupButton"),
+  systemChips: byId("systemChips"),
+  searchCount: byId("searchCount"),
+  results: byId("results"),
+  detailEmpty: byId("detailEmpty"),
+  detailCard: byId("detailCard"),
+  detailCover: byId("detailCover"),
+  detailTitle: byId("detailTitle"),
+  detailSystem: byId("detailSystem"),
+  detailSource: byId("detailSource"),
+  variantList: byId("variantList"),
+  destinationSummary: byId("destinationSummary"),
+  destinationHint: byId("destinationHint"),
+  browseSubfolderButton: byId("browseSubfolderButton"),
+  legalRow: byId("legalRow"),
+  legalConfirm: byId("legalConfirm"),
+  downloadButton: byId("downloadButton"),
+  downloadHelp: byId("downloadHelp"),
+  tray: byId("tray"),
+  trayName: byId("trayName"),
+  trayStatus: byId("trayStatus"),
+  trayProgress: byId("trayProgress"),
+  trayCancelButton: byId("trayCancelButton"),
+  trayOpenButton: byId("trayOpenButton"),
+  hintAccept: byId("hintAccept"),
+  settingsDialog: byId("settingsDialog"),
+  settingsCloseButton: byId("settingsCloseButton"),
+  destination: byId("destination"),
+  browseRootButton: byId("browseRootButton"),
+  defaultDirButton: byId("defaultDirButton"),
+  extractToggle: byId("extractToggle"),
+  rootFallbackToggle: byId("rootFallbackToggle"),
+  allFilesToggle: byId("allFilesToggle"),
+  catalogInfo: byId("catalogInfo"),
+  downloadsDialog: byId("downloadsDialog"),
+  downloadsCloseButton: byId("downloadsCloseButton"),
+  downloadFilters: document.querySelectorAll("[data-download-filter]"),
+  downloadsActiveCount: byId("downloadsActiveCount"),
+  downloadsCompletedCount: byId("downloadsCompletedCount"),
+  downloadsIssueCount: byId("downloadsIssueCount"),
+  downloadsList: byId("downloadsList"),
+  downloadsDetail: byId("downloadsDetail"),
 };
+
+/* Formatting */
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -108,78 +101,69 @@ function setHtml(element, html) {
   element.innerHTML = html;
 }
 
-function normalizePath(path) {
-  return String(path || "")
-    .replaceAll("\\", "/")
-    .replace(/^\.\//, "")
-    .replace(/^\/+/, "");
-}
-
-function fileNameFromPath(path) {
-  return normalizePath(path).split("/").filter(Boolean).at(-1) || path || "";
-}
-
-function fileExtension(path) {
-  const name = fileNameFromPath(path).toLowerCase();
-  const compound = [".tar.gz", ".tar.bz2", ".tar.xz"];
-  const matched = compound.find((suffix) => name.endsWith(suffix));
-  if (matched) return matched.slice(1);
-  const index = name.lastIndexOf(".");
-  return index > -1 ? name.slice(index + 1) : "file";
-}
-
-function cleanGameTitle(value) {
-  return String(value || "Selected game")
-    .replace(/\.(tar\.(gz|bz2|xz)|[a-z0-9]{1,6})$/i, "")
-    .replaceAll("_", " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function shortLabel(value, length = 34) {
-  const text = String(value || "");
-  return text.length > length ? `${text.slice(0, length - 1).trim()}…` : text;
-}
-
-function formatByteRate(value) {
-  let rate = Number(value || 0);
-  if (!Number.isFinite(rate) || rate <= 0) return "";
-  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+function formatBytes(value) {
+  let size = Number(value || 0);
+  const units = ["B", "KB", "MB", "GB", "TB"];
   let unit = units[0];
   for (const candidate of units) {
     unit = candidate;
-    if (rate < 1024 || candidate === units.at(-1)) break;
-    rate /= 1024;
+    if (size < 1024 || candidate === units.at(-1)) break;
+    size /= 1024;
   }
-  return `${rate >= 100 ? rate.toFixed(0) : rate.toFixed(1)} ${unit}`;
+  return unit === "B" ? `${size} B` : `${size >= 100 ? size.toFixed(0) : size.toFixed(1)} ${unit}`;
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  if (seconds < 60) return `${Math.ceil(seconds)}s left`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m left`;
+  return `${Math.floor(seconds / 3600)}h ${Math.ceil((seconds % 3600) / 60)}m left`;
 }
 
 function formatTimestamp(value) {
-  if (!value) return "Not available";
+  if (!value) return "";
   const date = new Date(Number(value));
-  if (Number.isNaN(date.getTime())) return "Not available";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function fileNameFromPath(path) {
+  return String(path || "").split("/").filter(Boolean).at(-1) || "";
+}
+
+const SYSTEM_NAMES = {
+  "3do": "3DO", amiga: "Amiga", arcade: "Arcade", atari2600: "Atari 2600", atari7800: "Atari 7800",
+  atarilynx: "Lynx", atarijaguar: "Jaguar", c64: "C64", dos: "DOS", dreamcast: "Dreamcast",
+  famicom: "Famicom", fds: "FDS", gameandwatch: "Game & Watch", gamegear: "Game Gear", gb: "Game Boy",
+  gba: "GBA", gbc: "GBC", gc: "GameCube", genesis: "Genesis", mastersystem: "Master System",
+  megacd: "Mega CD", megadrive: "Mega Drive", msx: "MSX", n3ds: "3DS", n64: "N64", nds: "DS",
+  neogeo: "Neo Geo", nes: "NES", ngp: "NGP", ngpc: "NGPC", pcengine: "PC Engine", ps2: "PS2",
+  ps3: "PS3", psp: "PSP", "psvita/ux0": "Vita", psx: "PS1", saturn: "Saturn", sega32x: "32X",
+  segacd: "Sega CD", sfc: "Super Famicom", snes: "SNES", switch: "Switch", virtualboy: "Virtual Boy",
+  wii: "Wii", "wiiu/roms": "Wii U", wonderswan: "WonderSwan", wonderswancolor: "WonderSwan Color",
+  xbox: "Xbox", "xbox360/roms": "Xbox 360",
+};
+
+function systemName(game) {
+  return SYSTEM_NAMES[game.route?.folder] || game.platform || "Unknown system";
+}
+
+const REGION_SHORT = { USA: "USA", Europe: "EUR", Japan: "JPN", World: "World", Brazil: "BRA", Korea: "KOR", Australia: "AUS" };
+
+function gameRegions(game) {
+  return [...new Set(game.variants.map((variant) => REGION_SHORT[variant.region]).filter(Boolean))];
+}
+
+function variantStem(variant) {
+  return variant.fileName.replace(/\.(tar\.(gz|bz2|xz)|[a-z0-9]{1,6})$/i, "");
 }
 
 function jobName(job) {
-  return (
-    job?.payload?.fileName ||
-    fileNameFromPath(job?.payload?.fullPath || job?.id || "") ||
-    "Untitled download"
-  );
+  return job?.payload?.title || job?.payload?.fileName || fileNameFromPath(job?.payload?.fullPath) || "Download";
 }
 
 function jobStatusLabel(status) {
-  return {
-    queued: "Queued",
-    running: "Downloading",
-    done: "Completed",
-    error: "Failed",
-    cancelled: "Cancelled",
-  }[status] || "Unknown";
+  return { queued: "Queued", running: "Downloading", done: "Completed", error: "Failed", cancelled: "Cancelled" }[status] || "Unknown";
 }
 
 function jobMatchesFilter(job, filter) {
@@ -189,42 +173,57 @@ function jobMatchesFilter(job, filter) {
   return true;
 }
 
-function formatLabel(result) {
-  const extension = result.extension || fileExtension(result.path || result.fileName);
-  const labels = {
-    "7z": "7Z archive",
-    zip: "ZIP archive",
-    rar: "RAR archive",
-    chd: "CHD image",
-    iso: "ISO image",
-    rvz: "RVZ image",
-    wua: "WUA package",
-    cia: "CIA package",
-    nsp: "NSP package",
-    xci: "XCI package",
-  };
-  return labels[extension.toLowerCase()] || `${extension.toUpperCase()} file`;
+/* Covers: fetched through the authenticated API, cached as object URLs */
+
+const coverUrls = new Map();
+const coverQueue = [];
+let coversLoading = 0;
+
+function coverKey(game) {
+  return game.coverSystem ? `${game.coverSystem}\n${variantStem(game.variants[0])}` : null;
 }
 
-function platformGlyph(platform) {
-  const words = String(platform || "Game").replace(/[^a-z0-9 ]/gi, " ").split(/\s+/).filter(Boolean);
-  if (!words.length) return "GM";
-  if (words.length === 1) return words[0].slice(0, 3);
-  return words.slice(-2).map((word) => word[0]).join("");
+function coverPlaceholder(game) {
+  return escapeHtml(SYSTEM_NAMES[game.route?.folder] || "");
 }
 
-function showEmptyResults(title, message, extra = "") {
-  elements.results.innerHTML = `
-    <div class="empty-note">
-      <strong>${escapeHtml(title)}</strong>
-      <span>${escapeHtml(message)}</span>
-      ${extra}
-    </div>
-  `;
+function paintCover(element, game) {
+  const key = coverKey(game);
+  const url = key ? coverUrls.get(key) : null;
+  element.innerHTML = url ? `<img alt="" src="${url}" />` : coverPlaceholder(game);
+  if (key && !coverUrls.has(key) && !coverQueue.some((item) => item.key === key)) {
+    coverQueue.push({ key, game });
+    pumpCovers();
+  }
 }
 
-function setResultsBusy(busy) {
-  elements.results.setAttribute("aria-busy", String(busy));
+function pumpCovers() {
+  while (coversLoading < 4 && coverQueue.length) {
+    const { key, game } = coverQueue.shift();
+    coversLoading += 1;
+    const params = new URLSearchParams({ system: game.coverSystem, title: variantStem(game.variants[0]) });
+    apiFetch(`/api/cover?${params}`)
+      .then((response) => (response.ok ? response.blob() : null))
+      .catch(() => null)
+      .then((blob) => {
+        coverUrls.set(key, blob ? URL.createObjectURL(blob) : null);
+        if (!blob) return;
+        for (const element of document.querySelectorAll("[data-cover-key]")) {
+          if (element.dataset.coverKey === key) element.innerHTML = `<img alt="" src="${coverUrls.get(key)}" />`;
+        }
+      })
+      .finally(() => {
+        coversLoading -= 1;
+        pumpCovers();
+      });
+  }
+}
+
+/* Status and settings */
+
+function setBanner(message) {
+  elements.setupBanner.hidden = !message;
+  elements.setupBannerText.textContent = message || "";
 }
 
 async function loadStatus() {
@@ -232,47 +231,52 @@ async function loadStatus() {
     const response = await apiFetch("/api/status");
     if (!response.ok) throw new Error("The local service is unavailable.");
     state.status = await response.json();
-    const downloaderReady = Boolean(
-      state.status.capabilities?.torrentDownload?.ready,
-    );
-    const archiveReady = Boolean(
-      state.status.capabilities?.archiveExtraction?.ready,
-    );
-    const runtimeReady = downloaderReady && archiveReady;
+    const capabilities = state.status.capabilities || {};
+    if (!capabilities.torrentDownload?.ready) {
+      setBanner("The download engine could not start. Use an official build of MiNERVA Deck.");
+    } else if (!capabilities.archiveExtraction?.ready) {
+      setBanner("Archive extraction is unavailable; downloads will be kept as archives.");
+    }
     // The system folder dialog needs the desktop window; paths can still be typed.
     const canPickFolders = Boolean(state.status.runtime?.desktop);
     elements.browseRootButton.hidden = !canPickFolders;
     elements.browseSubfolderButton.hidden = !canPickFolders;
-
-    elements.setupStatus.classList.toggle("ready", runtimeReady);
-    elements.setupStatusText.textContent = runtimeReady
-      ? "Ready to download"
-      : downloaderReady
-        ? "Extraction unavailable"
-        : "Engine unavailable";
-    if (!runtimeReady && sessionStorage.getItem("minerva.dismissedSetup") !== "1") {
-      elements.setupBanner.hidden = false;
-      elements.setupBannerText.textContent =
-        !downloaderReady
-          ? "The embedded libtorrent engine could not start. Use an official build or install the project dependencies."
-          : "The native libarchive library is missing. Use an official build, install the development dependency, or turn off automatic extraction.";
-    } else {
-      elements.setupBanner.hidden = true;
-    }
-
     elements.destination.value =
-      localStorage.getItem("minerva.destination") ||
-      state.status.defaultDestination ||
-      "";
+      localStorage.getItem("minerva.destination") || state.status.defaultDestination || "";
+    const index = state.status.searchIndex || {};
+    elements.catalogInfo.textContent = index.ready
+      ? `Search catalog: ${Number(index.count || 0).toLocaleString()} files, updated ${formatTimestamp(index.loadedAt)}.`
+      : "";
   } catch (error) {
     state.status = null;
-    elements.setupStatus.classList.remove("ready");
-    elements.setupStatusText.textContent = "Service unavailable";
-    elements.setupBanner.hidden = false;
-    elements.setupBannerText.textContent = error.message;
+    setBanner(error.message);
   }
-  updateDestinationSummary();
-  updateDownloadButton();
+  updateDetail();
+}
+
+function loadSettings() {
+  elements.extractToggle.checked = localStorage.getItem("minerva.extract") !== "false";
+  elements.rootFallbackToggle.checked = localStorage.getItem("minerva.rootFallback") === "true";
+  elements.allFilesToggle.checked = localStorage.getItem("minerva.allFiles") === "true";
+}
+
+function saveSettings() {
+  localStorage.setItem("minerva.destination", elements.destination.value.trim());
+  localStorage.setItem("minerva.extract", String(elements.extractToggle.checked));
+  localStorage.setItem("minerva.rootFallback", String(elements.rootFallbackToggle.checked));
+  localStorage.setItem("minerva.allFiles", String(elements.allFilesToggle.checked));
+  updateDetail();
+}
+
+/* Search */
+
+function showEmptyResults(title, message) {
+  elements.systemChips.replaceChildren();
+  elements.results.innerHTML = `<div class="empty"><strong>${escapeHtml(title)}</strong>${escapeHtml(message)}</div>`;
+}
+
+function setResultsBusy(busy) {
+  elements.results.setAttribute("aria-busy", String(busy));
 }
 
 function scheduleSearch(delay = 250) {
@@ -291,9 +295,9 @@ async function search(query, { polling = false } = {}) {
   if (trimmed.length < 3) {
     ++state.searchRequest;
     state.searchAbort?.abort();
-    elements.searchCount.textContent = "Ready";
+    elements.searchCount.textContent = "";
     setResultsBusy(false);
-    showEmptyResults("Search the archive", "Enter at least three characters: a game title, platform, or region.");
+    showEmptyResults("Search the archive", "Type at least three letters of a game's name.");
     return;
   }
 
@@ -302,315 +306,241 @@ async function search(query, { polling = false } = {}) {
     state.searchAbort?.abort();
     state.searchAbort = new AbortController();
   }
-
   setResultsBusy(true);
-  elements.searchCount.textContent = polling ? "Preparing…" : "Searching…";
-  if (!polling) {
-    showEmptyResults("Looking through MiNERVA", "This should only take a moment.");
-  }
 
   const params = new URLSearchParams({
     q: trimmed,
-    gamesOnly: String(elements.gamesOnlyToggle.checked),
+    gamesOnly: String(!elements.allFilesToggle.checked),
   });
-  if (elements.formatFilter.value) params.set("format", elements.formatFilter.value);
 
   try {
-    const response = await apiFetch(`/api/search?${params}`, {
-      signal: state.searchAbort?.signal,
-    });
+    const response = await apiFetch(`/api/search?${params}`, { signal: state.searchAbort?.signal });
     const payload = await response.json();
     if (requestId !== state.searchRequest) return;
 
     if (payload.indexing?.error) throw new Error(payload.indexing.error);
     if (!response.ok && response.status !== 202) throw new Error(payload.error || "Search failed");
     if (response.status === 202 || payload.indexing?.ready === false) {
-      renderIndexing(payload.indexing || payload.loaded || {});
+      renderIndexing(payload.indexing || {});
       state.searchPollTimer = setTimeout(() => search(trimmed, { polling: true }), 2000);
       return;
     }
     renderResults(payload.results || [], payload.total || 0, payload.more);
   } catch (error) {
     if (error.name === "AbortError" || requestId !== state.searchRequest) return;
-    elements.searchCount.textContent = "Unavailable";
-    showEmptyResults("Search could not finish", error.message, "");
+    elements.searchCount.textContent = "";
+    showEmptyResults("Search could not finish", error.message);
   } finally {
-    if (requestId === state.searchRequest && !state.searchPollTimer) {
-      setResultsBusy(false);
-    }
+    if (requestId === state.searchRequest && !state.searchPollTimer) setResultsBusy(false);
   }
 }
 
 function renderIndexing(indexing) {
   const processed = Number(indexing.processed || 0);
   const total = Number(indexing.total || 0);
-  const megabytes = (bytes) => (bytes / 1048576).toFixed(1);
-  const detail = total
-    ? `${megabytes(processed)} of ${megabytes(total)} MB. This happens once; search then works offline.`
-    : "MiNERVA Deck downloads its game catalog once; search then works offline.";
-  elements.searchCount.textContent = total
-    ? `${Math.floor((processed / total) * 100)}%`
-    : indexing.stage || "Preparing";
+  const percent = total ? Math.floor((processed / total) * 100) : 0;
+  elements.searchCount.textContent = total ? `${percent}%` : "";
+  elements.systemChips.replaceChildren();
   elements.results.innerHTML = `
-    <div class="empty-note">
+    <div class="empty">
       <strong>${escapeHtml(indexing.stage || "Preparing the game catalog")}</strong>
-      <span>${escapeHtml(detail)}</span>
-      <div class="index-progress" aria-hidden="true"><span></span></div>
+      ${total ? `${formatBytes(processed)} of ${formatBytes(total)}. ` : ""}This happens once; search then works offline.
+      <div class="progress" style="margin-top: 14px"><span style="width: ${percent}%"></span></div>
     </div>
   `;
 }
 
-function renderResults(results, total, more = false) {
-  clearTimeout(state.searchPollTimer);
-  state.searchPollTimer = null;
-  setResultsBusy(false);
-  const countLabel = total === 1 ? "1 result" : `${total.toLocaleString()} results`;
-  elements.searchCount.textContent = countLabel + (more ? " shown — refine your search for more" : "");
-  if (!results.length) {
-    showEmptyResults("No games found", "Try fewer words, a different platform, or turn off Games only.");
+function renderResults(games, total, more = false) {
+  state.games = games;
+  if (!games.length) {
+    elements.searchCount.textContent = "";
+    showEmptyResults("No games found", "Check the spelling, or try fewer words.");
     return;
   }
+  const systems = new Set(games.map(systemName));
+  if (state.systemFilter !== "all" && !systems.has(state.systemFilter)) state.systemFilter = "all";
+  elements.searchCount.textContent = more
+    ? `Top ${games.length} of ${total.toLocaleString()} files`
+    : `${games.length} ${games.length === 1 ? "game" : "games"}`;
+  renderChips();
+  renderList();
+}
 
+function renderChips() {
+  const counts = new Map();
+  for (const game of state.games) counts.set(systemName(game), (counts.get(systemName(game)) || 0) + 1);
+  const chips = [["all", `All ${state.games.length}`], ...[...counts].sort((a, b) => b[1] - a[1]).map(([name, count]) => [name, `${name} ${count}`])];
+  elements.systemChips.replaceChildren(...chips.map(([value, label]) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = `chip${value === state.systemFilter ? " active" : ""}`;
+    chip.setAttribute("role", "tab");
+    chip.setAttribute("aria-selected", String(value === state.systemFilter));
+    chip.dataset.system = value;
+    chip.textContent = label;
+    chip.addEventListener("click", () => setSystemFilter(value));
+    return chip;
+  }));
+}
+
+function setSystemFilter(value) {
+  state.systemFilter = value;
+  renderChips();
+  renderList();
+  elements.systemChips.querySelector(".chip.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+function cycleSystemFilter(step) {
+  const chips = [...elements.systemChips.querySelectorAll(".chip")];
+  if (!chips.length) return;
+  const index = chips.findIndex((chip) => chip.dataset.system === state.systemFilter);
+  setSystemFilter(chips[(index + step + chips.length) % chips.length].dataset.system);
+}
+
+function visibleGames() {
+  return state.systemFilter === "all"
+    ? state.games
+    : state.games.filter((game) => systemName(game) === state.systemFilter);
+}
+
+function renderList() {
+  const games = visibleGames();
+  if (!games.length) {
+    showEmptyResults("No games for this system", "Choose another system above.");
+    return;
+  }
   const fragment = document.createDocumentFragment();
-  for (const result of results) {
-    const platform = result.platform || result.system || "Unknown system";
-    const extension = result.extension || fileExtension(result.path || result.fileName);
+  for (const game of games) {
+    const regions = gameRegions(game);
+    const shown = regions.slice(0, 3).map((region) => `<span class="region">${escapeHtml(region)}</span>`).join("");
+    const extra = regions.length > 3 ? `<span class="region">+${regions.length - 3}</span>` : "";
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "result-button";
-    button.dataset.path = result.path;
-    button.setAttribute("aria-pressed", String(state.selected?.path === result.path));
-    if (state.selected?.path === result.path) button.classList.add("selected");
+    button.className = `result${game === state.selectedGame ? " selected" : ""}`;
     button.innerHTML = `
-      <span class="result-glyph" aria-hidden="true">${escapeHtml(platformGlyph(platform))}</span>
-      <span class="result-copy">
-        <span class="result-title">${escapeHtml(cleanGameTitle(result.fileName || fileNameFromPath(result.path)))}</span>
-        <span class="result-meta">${escapeHtml([platform, result.region, result.collection].filter(Boolean).join(" · "))}</span>
+      <span class="cover" data-cover-key="${escapeHtml(coverKey(game) || "")}"></span>
+      <span>
+        <span class="result-title">${escapeHtml(game.title)}</span>
+        <span class="result-sub">${escapeHtml(systemName(game))} · ${
+          game.verified ? `<span class="verified">Verified</span>` : escapeHtml(game.collection)
+        }${game.variants.length > 1 ? ` · ${game.variants.length} versions` : ""}</span>
       </span>
-      <span class="result-format">${escapeHtml(extension)}</span>
+      <span class="regions">${shown}${extra}</span>
+      <span class="result-size">${escapeHtml(game.variants[0].size)}</span>
     `;
-    button.addEventListener("click", () => selectResult(result));
+    paintCover(button.querySelector(".cover"), game);
+    // Moving through results with the d-pad previews each game.
+    button.addEventListener("focus", () => selectGame(game));
+    button.addEventListener("click", () => {
+      selectGame(game);
+      elements.variantList.querySelector('[aria-checked="true"]')?.focus();
+    });
     fragment.appendChild(button);
   }
   elements.results.replaceChildren(fragment);
 }
 
-function selectResult(result) {
-  state.selectionAbort?.abort();
-  state.selectionAbort = new AbortController();
-  const requestId = ++state.selectionRequest;
-  state.selected = result;
-  state.selectedRoute = result.route || null;
-  state.selectedMetadata = null;
+/* Selected game */
 
-  document.querySelectorAll(".result-button").forEach((button) => {
-    const selected = button.dataset.path === result.path;
-    button.classList.toggle("selected", selected);
-    button.setAttribute("aria-pressed", String(selected));
+function selectGame(game) {
+  if (state.selectedGame === game) return;
+  state.selectedGame = game;
+  state.selectedVariant = game.variants[0];
+  state.routeOverride = "";
+  const games = visibleGames();
+  elements.results.querySelectorAll(".result").forEach((button, index) => {
+    button.classList.toggle("selected", games[index] === game);
   });
 
-  elements.selectionEmpty.hidden = true;
-  elements.selectionCard.hidden = false;
-  const title = cleanGameTitle(result.fileName || fileNameFromPath(result.path));
-  const platform = result.platform || result.system || "Detecting system…";
-  elements.platformBadge.textContent = platform;
-  elements.selectedCollection.textContent = result.collection || "MiNERVA archive";
-  elements.selectedName.textContent = title;
-  elements.selectedPath.textContent = normalizePath(result.path);
-  elements.regionFact.hidden = !result.region;
-  elements.regionFact.textContent = result.region || "";
-  elements.formatFact.textContent = formatLabel(result);
-  elements.sizeFact.textContent = result.size || "Size pending";
-  elements.legalConfirm.checked = false;
-  elements.routeOverride.value = "";
-  elements.routeOverride.placeholder = result.route?.folder || "Automatically detected";
-
-  updateDestinationSummary();
-  updateDownloadButton();
-  loadRoute(result.path, requestId);
-  // Catalog results already identify their torrent; only older entries need a lookup.
-  if (result.torrentUrl && Number.isFinite(result.sizeBytes)) {
-    state.selectedMetadata = {
-      torrentUrl: result.torrentUrl,
-      fileIndex: result.fileIndex,
-      sizeBytes: result.sizeBytes,
-      size: result.size,
-    };
-  } else {
-    loadMetadata(result.path, requestId);
-  }
-
-  if (window.matchMedia("(max-width: 900px)").matches) {
-    elements.selectionCard.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+  elements.detailEmpty.hidden = true;
+  elements.detailCard.hidden = false;
+  elements.detailTitle.textContent = game.title;
+  elements.detailSystem.textContent = game.platform;
+  elements.detailSource.textContent = game.verified ? `Verified dump · ${game.collection}` : game.collection || "MiNERVA archive";
+  elements.detailSource.classList.toggle("verified", game.verified);
+  elements.detailCover.dataset.coverKey = coverKey(game) || "";
+  paintCover(elements.detailCover, game);
+  renderVariants();
+  updateDetail();
 }
 
-async function loadRoute(path, requestId) {
-  if (state.selectedRoute?.folder) {
-    updateDestinationSummary();
-    updateDownloadButton();
-    return;
-  }
-  try {
-    const response = await apiFetch(`/api/route?path=${encodeURIComponent(path)}`, {
-      signal: state.selectionAbort?.signal,
+function renderVariants() {
+  const game = state.selectedGame;
+  elements.variantList.replaceChildren(...game.variants.map((variant) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "variant";
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", String(variant === state.selectedVariant));
+    button.innerHTML = `<span>${escapeHtml(variant.label)}</span><span class="muted">${escapeHtml(variant.size)}</span>`;
+    button.title = variant.fileName;
+    button.addEventListener("click", () => {
+      state.selectedVariant = variant;
+      elements.variantList.querySelectorAll(".variant").forEach((item, index) => {
+        item.setAttribute("aria-checked", String(game.variants[index] === variant));
+      });
+      updateDetail();
+      elements.downloadButton.focus();
     });
-    const payload = await response.json();
-    if (requestId !== state.selectionRequest || state.selected?.path !== path) return;
-    state.selectedRoute = response.ok ? payload.route : null;
-    if (payload.route?.system) elements.platformBadge.textContent = payload.route.system;
-    elements.routeOverride.placeholder = payload.route?.folder || "Enter a system folder";
-  } catch {
-    if (requestId !== state.selectionRequest) return;
-    state.selectedRoute = null;
-  }
-  updateDestinationSummary();
-  updateDownloadButton();
+    return button;
+  }));
 }
 
-async function loadMetadata(path, requestId) {
-  try {
-    const response = await apiFetch(`/api/metadata?path=${encodeURIComponent(path)}`, {
-      signal: state.selectionAbort?.signal,
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Metadata unavailable");
-    if (requestId !== state.selectionRequest || state.selected?.path !== path) return;
-    state.selectedMetadata = payload;
-    elements.sizeFact.textContent = payload.size || state.selected?.size || "Size unavailable";
-  } catch {
-    if (requestId !== state.selectionRequest || state.selected?.path !== path) return;
-    state.selectedMetadata = null;
-    elements.sizeFact.textContent = state.selected?.size || "Size unavailable";
-  }
+function destinationFolder() {
+  const root = elements.destination.value.trim().replace(/\/+$/, "");
+  const folder = state.routeOverride || state.selectedGame?.route?.folder;
+  if (folder) return { path: `${root}/${folder}`, known: true };
+  if (elements.rootFallbackToggle.checked) return { path: root, known: true };
+  return { path: "", known: false };
 }
 
-function clearSelection() {
-  state.selectionAbort?.abort();
-  state.selectionAbort = null;
-  ++state.selectionRequest;
-  state.selected = null;
-  state.selectedRoute = null;
-  state.selectedMetadata = null;
-  elements.selectionCard.hidden = true;
-  elements.selectionEmpty.hidden = false;
-  elements.routeOverride.value = "";
-  elements.legalConfirm.checked = false;
-  document.querySelectorAll(".result-button").forEach((button) => {
-    button.classList.remove("selected");
-    button.setAttribute("aria-pressed", "false");
-  });
-  updateDestinationSummary();
-  updateDownloadButton();
-  elements.query.focus({ preventScroll: true });
+function legalAccepted() {
+  return localStorage.getItem("minerva.legalAccepted") === "true";
 }
 
-function updateDestinationSummary() {
-  const override = elements.routeOverride.value.trim();
-  const fallback = elements.rootFallbackToggle.checked;
-  elements.routeStatus.classList.remove("warning");
+function updateDetail() {
+  if (!state.selectedGame) return;
+  const destination = destinationFolder();
+  const engineReady = Boolean(state.status?.capabilities?.torrentDownload?.ready);
+  const hasRoot = Boolean(elements.destination.value.trim());
 
-  if (!state.selected) {
-    elements.destinationSummary.textContent = "Choose a game first";
-    elements.destinationHint.textContent = "The best destination will be selected automatically.";
-    elements.routeStatus.textContent = "Auto";
-    return;
-  }
+  elements.destinationSummary.textContent = destination.known
+    ? destination.path
+    : "This system has no EmuDeck folder";
+  elements.destinationHint.hidden = destination.known && !state.routeOverride;
+  elements.destinationHint.textContent = state.routeOverride
+    ? "Custom folder for this download."
+    : "Choose a folder, or turn on saving unrecognized systems in Settings.";
+  elements.legalRow.hidden = legalAccepted();
 
-  if (override) {
-    elements.destinationSummary.textContent = `EmuDeck › ${override}`;
-    elements.destinationHint.textContent = "Using your custom system subfolder.";
-    elements.routeStatus.textContent = "Custom";
-    return;
-  }
-
-  if (state.selectedRoute?.folder) {
-    elements.destinationSummary.textContent = `EmuDeck › ${state.selectedRoute.system || state.selectedRoute.folder}`;
-    elements.destinationHint.textContent = state.selectedRoute.folder;
-    elements.routeStatus.textContent = "Auto";
-    return;
-  }
-
-  if (fallback) {
-    elements.destinationSummary.textContent = "EmuDeck ROMs root";
-    elements.destinationHint.textContent = "Using the main folder fallback.";
-    elements.routeStatus.textContent = "Fallback";
-    elements.routeStatus.classList.add("warning");
-    return;
-  }
-
-  elements.destinationSummary.textContent = "System folder not recognized";
-  elements.destinationHint.textContent = "Choose a subfolder or enable the ROMs root fallback.";
-  elements.routeStatus.textContent = "Action needed";
-  elements.routeStatus.classList.add("warning");
-}
-
-function updateDownloadButton() {
-  const downloaderReady = Boolean(
-    state.status?.capabilities?.torrentDownload?.ready,
-  );
-  const archiveReady = Boolean(
-    state.status?.capabilities?.archiveExtraction?.ready,
-  );
-  const hasDestination = Boolean(elements.destination.value.trim());
-  const hasRoute = Boolean(
-    elements.routeOverride.value.trim() ||
-    state.selectedRoute?.folder ||
-    elements.rootFallbackToggle.checked,
-  );
-  const legal = elements.legalConfirm.checked;
-  const enabled = Boolean(
-    state.selected && downloaderReady && hasDestination && hasRoute && legal,
-  );
-  elements.downloadButton.disabled = !enabled;
-
-  const title = cleanGameTitle(state.selected?.fileName || fileNameFromPath(state.selected?.path || ""));
-  elements.downloadButtonLabel.textContent = elements.rootFallbackToggle.checked
-    ? `Download ${shortLabel(title || "game", 27)} to ROMs root`
-    : `Add ${shortLabel(title || "game", 31)} to EmuDeck`;
-
-  if (!state.selected) {
-    elements.downloadHelp.textContent = "Select a game to continue.";
-  } else if (!downloaderReady) {
-    elements.downloadHelp.textContent = "The embedded download engine is unavailable.";
-  } else if (!hasDestination) {
-    elements.downloadHelp.textContent = "Choose your EmuDeck ROMs root in Advanced options.";
-  } else if (!hasRoute) {
-    elements.downloadHelp.textContent = "Choose a system subfolder or enable the ROMs root fallback.";
-  } else if (!legal) {
-    elements.downloadHelp.textContent = "Confirm that you have the right to use this file.";
-  } else if (!archiveReady && elements.extractToggle.checked) {
-    elements.downloadHelp.textContent =
-      "Archive extraction is unavailable; turn it off or use an official build.";
-  } else {
-    elements.downloadHelp.textContent = "Ready to download and place in your library.";
-  }
+  const variant = state.selectedVariant;
+  elements.downloadButton.textContent = `Download · ${variant.size}`;
+  let help = "";
+  if (!engineReady) help = "The download engine is unavailable.";
+  else if (!hasRoot) help = "Choose your EmuDeck ROMs folder in Settings.";
+  else if (!destination.known) help = "Choose where this system's games go.";
+  else if (!legalAccepted() && !elements.legalConfirm.checked) help = "Confirm the statement above to download.";
+  elements.downloadHelp.textContent = help;
+  elements.downloadButton.disabled = Boolean(help);
 }
 
 async function startDownload() {
-  if (elements.downloadButton.disabled || !state.selected) return;
-  const destination = elements.destination.value.trim();
-  localStorage.setItem("minerva.destination", destination);
-  elements.downloadButton.disabled = true;
-  setJobUi({
-    status: "queued",
-    stage: "Adding to download queue",
-    progress: 0,
-    payload: { fileName: state.selected.fileName },
-    log: [],
-  });
-
+  if (elements.downloadButton.disabled || !state.selectedVariant) return;
+  if (elements.legalConfirm.checked) localStorage.setItem("minerva.legalAccepted", "true");
+  const game = state.selectedGame;
+  const variant = state.selectedVariant;
   const payload = {
-    fullPath: state.selected.path,
-    fileName: state.selected.fileName || fileNameFromPath(state.selected.path),
-    torrent: state.selectedMetadata?.torrentUrl || "",
-    romsRoot: destination,
-    systemFolderOverride: elements.routeOverride.value.trim(),
+    fullPath: variant.path,
+    fileName: variant.fileName,
+    title: `${game.title} (${variant.label})`,
+    torrent: variant.torrentUrl || "",
+    romsRoot: elements.destination.value.trim(),
+    systemFolderOverride: state.routeOverride,
     allowRomsRootFallback: elements.rootFallbackToggle.checked,
     extract: elements.extractToggle.checked,
-    legalConfirm: elements.legalConfirm.checked,
+    legalConfirm: true,
   };
-
+  elements.downloadButton.disabled = true;
   try {
     const response = await apiFetch("/api/download", {
       method: "POST",
@@ -618,287 +548,13 @@ async function startDownload() {
       body: JSON.stringify(payload),
     });
     const body = await response.json();
-    if (!response.ok) throw new Error(body.error || "Could not start download");
+    if (!response.ok) throw new Error(body.error || "Could not start the download");
     state.activeJobId = body.id;
-    setActivityExpanded(true);
     pollQueue();
   } catch (error) {
-    setJobUi({
-      status: "error",
-      stage: "Download could not start",
-      error: error.message,
-      payload,
-      log: [error.message],
-    });
+    elements.downloadHelp.textContent = error.message;
   }
-  updateDownloadButton();
-}
-
-async function pollQueue() {
-  clearTimeout(state.pollTimer);
-  try {
-    const response = await apiFetch("/api/jobs");
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Download queue unavailable");
-    const jobs = payload.jobs || [];
-    state.jobs = jobs;
-    setQueueUi(jobs);
-    if (!elements.downloadsDialog.hidden) setDownloadsUi(jobs);
-    const active =
-      jobs.find((job) => job.status === "running") ||
-      jobs.find((job) => job.id === state.activeJobId) ||
-      jobs.at(-1);
-    if (active) setJobUi(active);
-    else setIdleJobUi();
-
-    if (jobs.some((job) => job.status === "queued" || job.status === "running")) {
-      state.pollTimer = setTimeout(pollQueue, document.hidden ? 5000 : 1000);
-    }
-  } catch (error) {
-    setJobUi({ status: "error", stage: "Download service unavailable", error: error.message, log: [error.message] });
-  }
-  updateDownloadButton();
-}
-
-function setIdleJobUi() {
-  elements.jobStage.textContent = "Ready when you are";
-  elements.activityDetail.textContent = "Downloads and completed files will appear here.";
-  elements.jobPercent.textContent = "—";
-  elements.progressBar.style.width = "0%";
-  elements.progressTrack.setAttribute("aria-valuenow", "0");
-  elements.activityIcon.textContent = "↓";
-  elements.activityIcon.className = "activity-icon";
-}
-
-function setQueueUi(jobs) {
-  const activeCount = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
-  elements.queueBadge.hidden = activeCount === 0;
-  elements.queueBadge.textContent = String(activeCount);
-  if (!jobs.length) {
-    setHtml(elements.queueList, `<div class="empty-note"><span>No download history yet.</span></div>`);
-    return;
-  }
-  setHtml(elements.queueList, jobs.slice(-8).reverse().map((job) => {
-    const name = jobName(job);
-    const progress = Number.isFinite(job.progress) ? ` ${job.progress}%` : "";
-    return `<button class="queue-item ${escapeHtml(job.status)}" type="button" data-download-job="${escapeHtml(job.id)}">
-      <span>${escapeHtml(name)}</span>
-      <strong>${escapeHtml(jobStatusLabel(job.status))}${escapeHtml(progress)}</strong>
-    </button>`;
-  }).join(""));
-}
-
-function setDownloadsUi(jobs) {
-  const activeCount = jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
-  const completedCount = jobs.filter((job) => job.status === "done").length;
-  const issueCount = jobs.filter((job) => ["error", "cancelled"].includes(job.status)).length;
-  elements.downloadsActiveCount.textContent = String(activeCount);
-  elements.downloadsCompletedCount.textContent = String(completedCount);
-  elements.downloadsIssueCount.textContent = String(issueCount);
-
-  const filteredJobs = [...jobs]
-    .reverse()
-    .filter((job) => jobMatchesFilter(job, state.downloadsFilter));
-  if (!filteredJobs.some((job) => job.id === state.selectedJobId)) {
-    state.selectedJobId =
-      filteredJobs.find((job) => ["running", "queued"].includes(job.status))?.id ||
-      filteredJobs[0]?.id ||
-      null;
-  }
-
-  if (!filteredJobs.length) {
-    const message =
-      jobs.length && state.downloadsFilter !== "all"
-        ? "No downloads match this filter."
-        : "Your downloads will appear here and remain available after restarting MiNERVA Deck.";
-    setHtml(elements.downloadsList, `
-      <div class="empty-note">
-        <strong>No download history yet</strong>
-        <span>${escapeHtml(message)}</span>
-      </div>
-    `);
-  } else {
-    setHtml(elements.downloadsList, filteredJobs.map((job) => {
-      const progress = Number.isFinite(job.progress)
-        ? Math.max(0, Math.min(100, Number(job.progress)))
-        : 0;
-      return `
-        <button
-          class="download-history-item${job.id === state.selectedJobId ? " selected" : ""}"
-          type="button"
-          data-download-job="${escapeHtml(job.id)}"
-          aria-pressed="${job.id === state.selectedJobId}"
-        >
-          <span class="download-history-primary">
-            <strong>${escapeHtml(jobName(job))}</strong>
-            <span class="download-status ${escapeHtml(job.status)}">${escapeHtml(jobStatusLabel(job.status))}</span>
-          </span>
-          <span class="download-history-secondary">
-            <span>${escapeHtml(job.stage || jobStatusLabel(job.status))}</span>
-            <span>${escapeHtml(formatTimestamp(job.updatedAt))}</span>
-          </span>
-          <span class="download-mini-progress" aria-hidden="true">
-            <span style="width: ${progress}%"></span>
-          </span>
-        </button>
-      `;
-    }).join(""));
-  }
-  renderDownloadDetail(jobs.find((job) => job.id === state.selectedJobId));
-}
-
-function renderDownloadDetail(job) {
-  if (!job) {
-    setHtml(elements.downloadsDetail, `
-      <div class="download-detail-empty">
-        <strong>No download selected</strong>
-        <span>Choose an item to see its destination, progress, warnings, and technical log.</span>
-      </div>
-    `);
-    return;
-  }
-
-  const progress = Number.isFinite(job.progress)
-    ? Math.max(0, Math.min(100, Number(job.progress)))
-    : 0;
-  const rate = formatByteRate(job.rateBytes);
-  const peers = Number(job.peers || 0);
-  const progressLabel =
-    job.status === "running" && rate
-      ? `${rate} · ${peers} ${peers === 1 ? "peer" : "peers"}`
-      : job.stage || jobStatusLabel(job.status);
-  const outputs = (job.outputs || [])
-    .map((path) => `<div>${escapeHtml(path)}</div>`)
-    .join("");
-  const warnings = (job.warnings || [])
-    .map((warning) => `<p class="download-message">${escapeHtml(warning)}</p>`)
-    .join("");
-  const message = job.error
-    ? `<p class="download-message error">${escapeHtml(job.error)}</p>`
-    : warnings;
-  const log = (job.log || []).join("\n");
-
-  setHtml(elements.downloadsDetail, `
-    <div class="download-detail-head">
-      <div>
-        <h3>${escapeHtml(jobName(job))}</h3>
-        <div class="download-detail-meta">
-          <span>Added ${escapeHtml(formatTimestamp(job.createdAt))}</span>
-          <span>${job.finishedAt ? `Finished ${escapeHtml(formatTimestamp(job.finishedAt))}` : "Not finished"}</span>
-        </div>
-      </div>
-      <span class="download-status ${escapeHtml(job.status)}">${escapeHtml(jobStatusLabel(job.status))}</span>
-    </div>
-    <div class="download-detail-progress">
-      <div class="download-detail-progress-copy">
-        <span>${escapeHtml(progressLabel)}</span>
-        <span>${Number.isFinite(job.progress) ? `${progress}%` : "—"}</span>
-      </div>
-      <div class="download-mini-progress" role="progressbar" aria-label="Selected download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}">
-        <span style="width: ${progress}%"></span>
-      </div>
-    </div>
-    ${message}
-    ${outputs ? `
-      <section class="download-detail-section">
-        <h4>Saved files</h4>
-        <div class="download-path-list">${outputs}</div>
-      </section>
-    ` : ""}
-    <section class="download-detail-section">
-      <h4>Technical log</h4>
-      <pre class="job-log">${escapeHtml(log || "No technical log entries.")}</pre>
-    </section>
-  `);
-}
-
-function setDownloadsFilter(filter) {
-  state.downloadsFilter = filter;
-  for (const button of elements.downloadFilters) {
-    const selected = button.dataset.downloadFilter === filter;
-    button.classList.toggle("active", selected);
-    button.setAttribute("aria-selected", String(selected));
-  }
-  setDownloadsUi(state.jobs);
-}
-
-function openDownloads(jobId = null) {
-  if (jobId) state.selectedJobId = jobId;
-  if (elements.downloadsDialog.hidden) {
-    state.downloadsPreviousFocus = document.activeElement;
-    elements.downloadsDialog.hidden = false;
-    document.body.classList.add("downloads-open");
-  }
-  elements.downloadsButton.setAttribute("aria-expanded", "true");
-  setDownloadsUi(state.jobs);
-  pollQueue();
-  requestAnimationFrame(() => {
-    const selected = elements.downloadsList.querySelector(".download-history-item.selected");
-    (selected || elements.downloadsCloseButton).focus();
-  });
-}
-
-function closeDownloads() {
-  if (elements.downloadsDialog.hidden) return;
-  elements.downloadsDialog.hidden = true;
-  document.body.classList.remove("downloads-open");
-  resetDownloadsState();
-}
-
-function resetDownloadsState() {
-  elements.downloadsButton.setAttribute("aria-expanded", "false");
-  const previous = state.downloadsPreviousFocus;
-  state.downloadsPreviousFocus = null;
-  if (previous instanceof HTMLElement) previous.focus({ preventScroll: true });
-}
-
-function setJobUi(job) {
-  const progress = Number.isFinite(job.progress) ? Math.max(0, Math.min(100, job.progress)) : 0;
-  const name = job.payload?.fileName || fileNameFromPath(job.payload?.fullPath || "");
-  const transferRate = formatByteRate(job.rateBytes);
-  const peerLabel = Number(job.peers) === 1 ? "1 peer" : `${Number(job.peers || 0)} peers`;
-  const transferDetail =
-    job.status === "running" && transferRate
-      ? `${transferRate} · ${peerLabel}`
-      : "";
-  elements.jobStage.textContent = job.stage || "Working";
-  elements.activityDetail.textContent =
-    job.error ||
-    job.warnings?.[0] ||
-    transferDetail ||
-    name ||
-    "Preparing your download.";
-  elements.jobPercent.textContent = Number.isFinite(job.progress) ? `${progress}%` : "—";
-  elements.progressBar.style.width = `${progress}%`;
-  elements.progressTrack.setAttribute("aria-valuenow", String(progress));
-  setHtml(
-    elements.outputs,
-    (job.outputs || []).map((item) => `<div>Saved to ${escapeHtml(item)}</div>`).join("")
-      + (job.warnings || [])
-        .map((warning) => `<div class="output-warning">${escapeHtml(warning)}</div>`)
-        .join(""),
-  );
-  const jobLog = (job.log || []).join("\n");
-  if (elements.jobLog.textContent !== jobLog) {
-    elements.jobLog.textContent = jobLog;
-    elements.jobLog.scrollTop = elements.jobLog.scrollHeight;
-  }
-
-  elements.activityIcon.className = "activity-icon";
-  if (job.status === "done") {
-    elements.activityIcon.textContent = "✓";
-    elements.activityIcon.classList.add("done");
-  } else if (job.status === "error") {
-    elements.activityIcon.textContent = "!";
-    elements.activityIcon.classList.add("error");
-  } else {
-    elements.activityIcon.textContent = "↓";
-  }
-}
-
-function setActivityExpanded(expanded) {
-  elements.activityDrawer.hidden = !expanded;
-  elements.activitySummary.setAttribute("aria-expanded", String(expanded));
+  updateDetail();
 }
 
 async function pickFolder(mode) {
@@ -912,7 +568,7 @@ async function pickFolder(mode) {
       body: JSON.stringify({
         mode,
         root: elements.destination.value.trim(),
-        current: elements.routeOverride.value.trim(),
+        current: state.routeOverride || state.selectedGame?.route?.folder || "",
       }),
     });
     const payload = await response.json();
@@ -920,183 +576,242 @@ async function pickFolder(mode) {
     if (!payload.path) return;
     if (mode === "root") {
       elements.destination.value = payload.path;
-      localStorage.setItem("minerva.destination", payload.path);
+      saveSettings();
     } else {
-      elements.routeOverride.value = payload.path;
+      state.routeOverride = payload.path;
+      updateDetail();
     }
-    updateDestinationSummary();
-    updateDownloadButton();
   } catch (error) {
-    elements.destinationHint.textContent = error.message;
+    (mode === "root" ? elements.catalogInfo : elements.downloadHelp).textContent = error.message;
   } finally {
     button.disabled = false;
     button.focus({ preventScroll: true });
   }
 }
 
-function bindEvents() {
-  elements.query.addEventListener("input", () => scheduleSearch());
-  elements.gamesOnlyToggle.addEventListener("change", () => scheduleSearch(0));
-  elements.formatFilter.addEventListener("change", () => scheduleSearch(0));
-  elements.clearButton.addEventListener("click", clearSelection);
-  elements.legalConfirm.addEventListener("change", updateDownloadButton);
-  elements.extractToggle.addEventListener("change", updateDownloadButton);
-  elements.rootFallbackToggle.addEventListener("change", () => {
-    updateDestinationSummary();
-    updateDownloadButton();
-  });
-  elements.destination.addEventListener("input", updateDownloadButton);
-  elements.routeOverride.addEventListener("input", () => {
-    updateDestinationSummary();
-    updateDownloadButton();
-  });
-  elements.defaultDirButton.addEventListener("click", () => {
-    elements.destination.value = state.status?.defaultDestination || "";
-    updateDownloadButton();
-  });
-  elements.autoRouteButton.addEventListener("click", () => {
-    elements.routeOverride.value = "";
-    updateDestinationSummary();
-    updateDownloadButton();
-  });
-  elements.browseRootButton.addEventListener("click", () => pickFolder("root"));
-  elements.browseSubfolderButton.addEventListener("click", () => pickFolder("subfolder"));
-  elements.downloadButton.addEventListener("click", startDownload);
-  elements.dismissSetupButton.addEventListener("click", () => {
-    sessionStorage.setItem("minerva.dismissedSetup", "1");
-    elements.setupBanner.hidden = true;
-  });
-  elements.activitySummary.addEventListener("click", () => {
-    setActivityExpanded(elements.activitySummary.getAttribute("aria-expanded") !== "true");
-  });
-  elements.downloadsButton.addEventListener("click", () => openDownloads());
-  elements.downloadsCloseButton.addEventListener("click", closeDownloads);
-  elements.downloadsRefreshButton.addEventListener("click", pollQueue);
-  elements.downloadsDialog.addEventListener("click", (event) => {
-    if (event.target === elements.downloadsDialog) closeDownloads();
-  });
-  for (const button of elements.downloadFilters) {
-    button.addEventListener("click", () => setDownloadsFilter(button.dataset.downloadFilter));
-  }
-  elements.downloadsList.addEventListener("click", (event) => {
-    const item = event.target.closest("[data-download-job]");
-    if (!item) return;
-    state.selectedJobId = item.dataset.downloadJob;
-    setDownloadsUi(state.jobs);
-  });
-  elements.queueList.addEventListener("click", (event) => {
-    const item = event.target.closest("[data-download-job]");
-    if (!item) return;
-    openDownloads(item.dataset.downloadJob);
-  });
-  document.addEventListener("keydown", handleControllerKeyboard);
-}
+/* Downloads */
 
-async function init() {
-  bindEvents();
-  showEmptyResults("Search the archive", "Enter at least three characters: a game title, platform, or region.");
-  await loadStatus();
-  pollQueue();
-  requestAnimationFrame(() => {
-    elements.query.focus();
-    startGamepadNavigation();
-  });
-}
-
-function controllerTargets() {
-  const root = !elements.downloadsDialog.hidden
-    ? elements.downloadsDialog
-    : document;
-  return Array.from(
-    root.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), summary"),
-  ).filter((element) => {
-    const style = window.getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
-  });
-}
-
-function ensureControllerFocus() {
-  const targets = controllerTargets();
-  if (targets.length && !targets.includes(document.activeElement)) targets[0].focus();
-}
-
-function handleControllerKeyboard(event) {
-  if (event.altKey || event.ctrlKey || event.metaKey) return;
-  if (event.key === "Escape") {
-    if (!elements.downloadsDialog.hidden) {
-      closeDownloads();
-      return;
+async function pollQueue() {
+  clearTimeout(state.pollTimer);
+  state.pollTimer = null;
+  try {
+    const response = await apiFetch("/api/jobs");
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Downloads are unavailable");
+    state.jobs = payload.jobs || [];
+    renderTray();
+    if (!elements.downloadsDialog.hidden) renderDownloads();
+    if (state.jobs.some((job) => job.status === "queued" || job.status === "running")) {
+      state.pollTimer = setTimeout(pollQueue, document.hidden ? 5000 : 1000);
     }
+  } catch (error) {
+    elements.trayStatus.textContent = error.message;
   }
-
-  const arrows = {
-    ArrowUp: "up",
-    ArrowDown: "down",
-    ArrowLeft: "left",
-    ArrowRight: "right",
-  };
-  if (!arrows[event.key]) return;
-  if (event.target instanceof HTMLSelectElement) return;
-  const isTextInput = event.target instanceof HTMLInputElement && event.target.type !== "checkbox";
-  if (isTextInput && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
-  event.preventDefault();
-  moveControllerFocus(arrows[event.key]);
 }
 
-function moveControllerFocus(direction) {
-  const targets = controllerTargets();
-  if (!targets.length) return;
-  const active = targets.includes(document.activeElement) ? document.activeElement : targets[0];
-  const currentCenter = rectCenter(active.getBoundingClientRect());
-  let best = null;
-  let bestScore = Number.POSITIVE_INFINITY;
+function trayJob() {
+  return (
+    state.jobs.find((job) => job.status === "running") ||
+    state.jobs.find((job) => job.id === state.activeJobId) ||
+    state.jobs.find((job) => job.status === "queued")
+  );
+}
 
+function jobDetail(job) {
+  if (job.status === "running" && job.totalBytes) {
+    const remaining = job.rateBytes ? (job.totalBytes - job.downloadedBytes) / job.rateBytes : NaN;
+    return [
+      `${formatBytes(job.downloadedBytes)} of ${formatBytes(job.totalBytes)}`,
+      job.rateBytes ? `${formatBytes(job.rateBytes)}/s` : "Finding peers",
+      formatDuration(remaining),
+    ].filter(Boolean).join(" · ");
+  }
+  if (job.status === "done") return job.outputs?.[0] ? `Saved to ${job.outputs[0]}` : "Completed";
+  if (job.status === "error") return job.error || "Failed";
+  return job.stage || jobStatusLabel(job.status);
+}
+
+function renderTray() {
+  const active = state.jobs.filter((job) => job.status === "queued" || job.status === "running").length;
+  elements.queueBadge.hidden = active === 0;
+  elements.queueBadge.textContent = String(active);
+  const job = trayJob();
+  elements.tray.hidden = !job;
+  if (!job) return;
+  const queued = state.jobs.filter((item) => item.status === "queued" && item !== job).length;
+  elements.tray.className = `tray ${job.status}`;
+  elements.trayName.textContent = queued ? `${jobName(job)} (+${queued} queued)` : jobName(job);
+  elements.trayStatus.textContent = jobDetail(job);
+  const progress = job.status === "done" ? 100 : Math.max(0, Math.min(100, Number(job.progress) || 0));
+  elements.trayProgress.style.width = `${progress}%`;
+  elements.trayCancelButton.hidden = !["queued", "running"].includes(job.status);
+}
+
+async function cancelJob(jobId) {
+  if (!jobId) return;
+  await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } });
+  pollQueue();
+}
+
+function renderDownloads() {
+  const jobs = state.jobs;
+  elements.downloadsActiveCount.textContent = String(jobs.filter((job) => jobMatchesFilter(job, "active")).length);
+  elements.downloadsCompletedCount.textContent = String(jobs.filter((job) => job.status === "done").length);
+  elements.downloadsIssueCount.textContent = String(jobs.filter((job) => jobMatchesFilter(job, "issues")).length);
+  const filtered = [...jobs].reverse().filter((job) => jobMatchesFilter(job, state.downloadsFilter));
+  if (!filtered.some((job) => job.id === state.selectedJobId)) state.selectedJobId = filtered[0]?.id || null;
+
+  setHtml(elements.downloadsList, filtered.length
+    ? filtered.map((job) => `
+        <button class="download-item ${escapeHtml(job.status)}${job.id === state.selectedJobId ? " selected" : ""}" type="button" data-job="${escapeHtml(job.id)}">
+          <span class="download-item-top">
+            <strong>${escapeHtml(jobName(job))}</strong>
+            <span class="status ${escapeHtml(job.status)}">${escapeHtml(jobStatusLabel(job.status))}</span>
+          </span>
+          <span class="progress"><span style="width: ${job.status === "done" ? 100 : Number(job.progress) || 0}%"></span></span>
+        </button>`).join("")
+    : `<div class="empty"><strong>Nothing here yet</strong>Downloads you start will be listed here.</div>`);
+
+  const job = jobs.find((item) => item.id === state.selectedJobId);
+  setHtml(elements.downloadsDetail, job ? `
+      <h3>${escapeHtml(jobName(job))}</h3>
+      <p class="muted">${escapeHtml(jobStatusLabel(job.status))} · Added ${escapeHtml(formatTimestamp(job.createdAt))}</p>
+      <p class="${job.status === "error" ? "error-text" : ""}">${escapeHtml(jobDetail(job))}</p>
+      ${(job.warnings || []).map((warning) => `<p class="hint">${escapeHtml(warning)}</p>`).join("")}
+      ${["queued", "running"].includes(job.status) ? `<button class="button small" type="button" data-cancel-job="${escapeHtml(job.id)}">Cancel download</button>` : ""}
+      <pre class="log">${escapeHtml((job.log || []).join("\n") || "No log entries.")}</pre>
+    ` : "");
+}
+
+/* Overlays */
+
+function openOverlay(overlay) {
+  state.overlayReturnFocus = document.activeElement;
+  overlay.hidden = false;
+  if (overlay === elements.downloadsDialog) {
+    elements.downloadsButton.setAttribute("aria-expanded", "true");
+    renderDownloads();
+    pollQueue();
+  }
+  overlay.querySelector("button")?.focus();
+}
+
+function closeOverlays() {
+  const open = [elements.settingsDialog, elements.downloadsDialog].filter((overlay) => !overlay.hidden);
+  if (!open.length) return false;
+  for (const overlay of open) overlay.hidden = true;
+  elements.downloadsButton.setAttribute("aria-expanded", "false");
+  saveSettings();
+  state.overlayReturnFocus?.focus?.({ preventScroll: true });
+  return true;
+}
+
+/* Controller and keyboard navigation */
+
+function openOverlayRoot() {
+  return [elements.settingsDialog, elements.downloadsDialog].find((overlay) => !overlay.hidden) || null;
+}
+
+function focusTargets() {
+  const root = openOverlayRoot() || document;
+  return [...root.querySelectorAll("button:not([disabled]), input:not([disabled])")].filter(
+    (element) => element.getClientRects().length > 0 && !element.closest("[hidden]"),
+  );
+}
+
+function moveFocus(direction) {
+  const targets = focusTargets();
+  if (!targets.length) return;
+  const active = targets.includes(document.activeElement) ? document.activeElement : null;
+  if (!active) {
+    (elements.results.querySelector(".result") || targets[0]).focus();
+    return;
+  }
+  const from = active.getBoundingClientRect();
+  const origin = { x: from.left + from.width / 2, y: from.top + from.height / 2 };
+  let best = null;
+  let bestScore = Infinity;
   for (const target of targets) {
     if (target === active) continue;
-    const center = rectCenter(target.getBoundingClientRect());
-    const dx = center.x - currentCenter.x;
-    const dy = center.y - currentCenter.y;
-    if (!isInDirection(direction, dx, dy)) continue;
-    const primary = direction === "left" || direction === "right" ? Math.abs(dx) : Math.abs(dy);
-    const secondary = direction === "left" || direction === "right" ? Math.abs(dy) : Math.abs(dx);
-    const score = primary * 3 + secondary;
+    const rect = target.getBoundingClientRect();
+    const dx = rect.left + rect.width / 2 - origin.x;
+    const dy = rect.top + rect.height / 2 - origin.y;
+    const horizontal = direction === "left" || direction === "right";
+    const along = horizontal ? dx : dy;
+    const across = horizontal ? dy : dx;
+    if ((direction === "up" || direction === "left") ? along >= -4 : along <= 4) continue;
+    if (Math.abs(along) < Math.abs(across) * 0.35) continue;
+    const score = Math.abs(along) * 3 + Math.abs(across);
     if (score < bestScore) {
       best = target;
       bestScore = score;
     }
   }
-
-  if (!best) {
-    const index = targets.indexOf(active);
-    const offset = direction === "up" || direction === "left" ? -1 : 1;
-    best = targets[Math.max(0, Math.min(targets.length - 1, index + offset))];
-  }
+  if (!best) return;
   best.focus({ preventScroll: true });
-  best.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  best.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-function rectCenter(rect) {
-  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+function goBack() {
+  if (closeOverlays()) return;
+  if (elements.detailCard.contains(document.activeElement)) {
+    elements.results.querySelector(".result.selected")?.focus();
+    return;
+  }
+  focusSearch();
 }
 
-function isInDirection(direction, dx, dy) {
-  if (direction === "up") return dy < -4 && Math.abs(dy) >= Math.abs(dx) * 0.35;
-  if (direction === "down") return dy > 4 && Math.abs(dy) >= Math.abs(dx) * 0.35;
-  if (direction === "left") return dx < -4 && Math.abs(dx) >= Math.abs(dy) * 0.35;
-  return dx > 4 && Math.abs(dx) >= Math.abs(dy) * 0.35;
+function focusSearch() {
+  closeOverlays();
+  elements.query.focus({ preventScroll: true });
+  elements.query.select();
 }
+
+function updateHints() {
+  const active = document.activeElement;
+  elements.hintAccept.textContent = active?.classList.contains("result")
+    ? "Versions"
+    : active === elements.downloadButton
+      ? "Download"
+      : "Select";
+}
+
+function handleKeys(event) {
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  const typing = event.target instanceof HTMLInputElement && event.target.type !== "checkbox";
+  if (event.key === "Escape") {
+    event.preventDefault();
+    goBack();
+    return;
+  }
+  if (event.key === "/" && !typing) {
+    event.preventDefault();
+    focusSearch();
+    return;
+  }
+  const directions = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+  const direction = directions[event.key];
+  if (!direction || (typing && (direction === "left" || direction === "right"))) return;
+  event.preventDefault();
+  moveFocus(direction);
+}
+
+const controllerInput = new ControllerInput({
+  onDirection: moveFocus,
+  onAccept: () => document.activeElement?.click(),
+  onCancel: goBack,
+  onSearch: focusSearch,
+  onPrevious: () => cycleSystemFilter(-1),
+  onNext: () => cycleSystemFilter(1),
+});
 
 function startGamepadNavigation() {
-  if (startGamepadNavigation.started) return;
-  startGamepadNavigation.started = true;
   const poller = createGamepadPoller({
     input: controllerInput,
-    getGamepads: () => navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [],
+    getGamepads: () => (navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : []),
     isActive: () => !document.hidden && document.hasFocus(),
   });
-  window.addEventListener("gamepaddisconnected", (event) => {
-    controllerInput.disconnect(event.gamepad.index);
-  });
+  window.addEventListener("gamepaddisconnected", (event) => controllerInput.disconnect(event.gamepad.index));
   window.addEventListener("gamepadconnected", () => poller.start());
   window.addEventListener("blur", () => poller.stop());
   window.addEventListener("focus", () => poller.start());
@@ -1112,21 +827,79 @@ function startGamepadNavigation() {
   poller.start();
 }
 
-function acceptControllerAction() {
-  ensureControllerFocus();
-  document.activeElement?.click();
+/* Wiring */
+
+function bindEvents() {
+  elements.query.addEventListener("input", () => {
+    elements.clearQueryButton.hidden = !elements.query.value;
+    scheduleSearch();
+  });
+  elements.query.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === "ArrowDown") {
+      event.preventDefault();
+      elements.results.querySelector(".result")?.focus();
+    }
+  });
+  elements.clearQueryButton.addEventListener("click", () => {
+    elements.query.value = "";
+    elements.clearQueryButton.hidden = true;
+    scheduleSearch(0);
+    elements.query.focus();
+  });
+  elements.dismissSetupButton.addEventListener("click", () => setBanner(""));
+  elements.settingsButton.addEventListener("click", () => openOverlay(elements.settingsDialog));
+  elements.settingsCloseButton.addEventListener("click", closeOverlays);
+  elements.downloadsButton.addEventListener("click", () => openOverlay(elements.downloadsDialog));
+  elements.downloadsCloseButton.addEventListener("click", closeOverlays);
+  elements.trayOpenButton.addEventListener("click", () => openOverlay(elements.downloadsDialog));
+  elements.trayCancelButton.addEventListener("click", () => cancelJob(trayJob()?.id));
+  elements.downloadButton.addEventListener("click", startDownload);
+  elements.legalConfirm.addEventListener("change", updateDetail);
+  elements.browseRootButton.addEventListener("click", () => pickFolder("root"));
+  elements.browseSubfolderButton.addEventListener("click", () => pickFolder("subfolder"));
+  elements.defaultDirButton.addEventListener("click", () => {
+    elements.destination.value = state.status?.defaultDestination || "";
+    saveSettings();
+  });
+  elements.destination.addEventListener("change", saveSettings);
+  elements.extractToggle.addEventListener("change", saveSettings);
+  elements.rootFallbackToggle.addEventListener("change", saveSettings);
+  elements.allFilesToggle.addEventListener("change", () => {
+    saveSettings();
+    scheduleSearch(0);
+  });
+  for (const button of elements.downloadFilters) {
+    button.addEventListener("click", () => {
+      state.downloadsFilter = button.dataset.downloadFilter;
+      for (const other of elements.downloadFilters) {
+        other.classList.toggle("active", other === button);
+        other.setAttribute("aria-selected", String(other === button));
+      }
+      renderDownloads();
+    });
+  }
+  elements.downloadsList.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-job]");
+    if (!item) return;
+    state.selectedJobId = item.dataset.job;
+    renderDownloads();
+  });
+  elements.downloadsDetail.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cancel-job]");
+    if (button) cancelJob(button.dataset.cancelJob);
+  });
+  document.addEventListener("keydown", handleKeys);
+  document.addEventListener("focusin", updateHints);
 }
 
-function cancelControllerAction() {
-  if (!elements.downloadsDialog.hidden) closeDownloads();
-  else if (elements.advancedOptions.open) elements.advancedOptions.open = false;
-  else elements.query.focus({ preventScroll: true });
+async function init() {
+  loadSettings();
+  bindEvents();
+  showEmptyResults("Search the archive", "Type at least three letters of a game's name.");
+  await loadStatus();
+  pollQueue();
+  elements.query.focus();
+  startGamepadNavigation();
 }
-
-const controllerInput = new ControllerInput({
-  onDirection: moveControllerFocus,
-  onAccept: acceptControllerAction,
-  onCancel: cancelControllerAction,
-});
 
 init();

@@ -8,6 +8,9 @@ export const CONTROLLER_TIMING = Object.freeze({
 const BUTTON = Object.freeze({
   accept: 0,
   cancel: 1,
+  search: 3,
+  previous: 4,
+  next: 5,
   up: 12,
   down: 13,
   left: 14,
@@ -59,6 +62,9 @@ function readButtons(pad) {
   return {
     accept: pressed(pad, BUTTON.accept),
     cancel: pressed(pad, BUTTON.cancel),
+    search: pressed(pad, BUTTON.search),
+    previous: pressed(pad, BUTTON.previous),
+    next: pressed(pad, BUTTON.next),
     up: pressed(pad, BUTTON.up),
     down: pressed(pad, BUTTON.down),
     left: pressed(pad, BUTTON.left),
@@ -83,6 +89,9 @@ function makeDeviceState(pad) {
     buttons: {
       accept: false,
       cancel: false,
+      search: false,
+      previous: false,
+      next: false,
       up: false,
       down: false,
       left: false,
@@ -96,11 +105,17 @@ export class ControllerInput {
     onDirection,
     onAccept,
     onCancel,
+    onSearch = () => {},
+    onPrevious = () => {},
+    onNext = () => {},
     now = () => performance.now(),
   }) {
     this.onDirection = onDirection;
     this.onAccept = onAccept;
     this.onCancel = onCancel;
+    this.onSearch = onSearch;
+    this.onPrevious = onPrevious;
+    this.onNext = onNext;
     this.now = now;
     this.devices = new Map();
     this.activeIndex = null;
@@ -161,6 +176,9 @@ export class ControllerInput {
 
     if (selected.acceptPressed) this.onAccept();
     if (selected.cancelPressed) this.onCancel();
+    if (selected.searchPressed) this.onSearch();
+    if (selected.previousPressed) this.onPrevious();
+    if (selected.nextPressed) this.onNext();
     this.processDirection(selected.direction);
   }
 
@@ -187,6 +205,9 @@ export class ControllerInput {
         direction: null,
         acceptPressed: false,
         cancelPressed: false,
+        searchPressed: false,
+        previousPressed: false,
+        nextPressed: false,
         digitalActivity: false,
         newActivity: false,
         hasInput: false,
@@ -199,6 +220,10 @@ export class ControllerInput {
     const nextDirection = directionFor(buttons, device.axisX, device.axisY);
     const acceptPressed = buttons.accept && !device.buttons.accept;
     const cancelPressed = buttons.cancel && !device.buttons.cancel;
+    const searchPressed = buttons.search && !device.buttons.search;
+    const previousPressed = buttons.previous && !device.buttons.previous;
+    const nextPressed = buttons.next && !device.buttons.next;
+    const actionPressed = acceptPressed || cancelPressed || searchPressed || previousPressed || nextPressed;
     const directionPressed = nextDirection !== null && nextDirection !== device.direction;
     const digitalDirectionPressed =
       nextButtonDirection !== null && nextButtonDirection !== device.buttonDirection;
@@ -212,8 +237,11 @@ export class ControllerInput {
       direction: nextDirection,
       acceptPressed,
       cancelPressed,
-      digitalActivity: acceptPressed || cancelPressed || digitalDirectionPressed,
-      newActivity: acceptPressed || cancelPressed || directionPressed,
+      searchPressed,
+      previousPressed,
+      nextPressed,
+      digitalActivity: actionPressed || digitalDirectionPressed,
+      newActivity: actionPressed || directionPressed,
       hasInput: Boolean(nextDirection || buttons.accept || buttons.cancel),
     };
   }

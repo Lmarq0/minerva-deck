@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 
 from .browsing import FolderPicker, pick_folder_payload
 from .catalog import SEARCH_INDEX
+from .covers import cover_image
 from .config import (
     APP_NAME,
     APP_VERSION,
@@ -93,6 +94,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 return self.send_json({"error": str(exc)}, status=400)
         if path == "/api/jobs":
             return self.send_json({"jobs": JOBS.list()})
+        if path == "/api/cover":
+            query = parse_qs(parsed.query)
+            image = cover_image(query.get("system", [""])[0], query.get("title", [""])[0])
+            if image is None:
+                return self.send_json({"error": "No cover"}, status=404)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(image)))
+            self.send_header("Cache-Control", "private, max-age=86400")
+            self.end_headers()
+            self.wfile.write(image)
+            return None
         if path.startswith("/api/jobs/"):
             job = JOBS.get(path.rsplit("/", 1)[-1])
             if not job:
@@ -106,6 +119,11 @@ class AppHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path.startswith("/api/") and not self.api_authorized():
             return self.send_json({"error": "Forbidden"}, status=403)
+        if path.startswith("/api/jobs/") and path.endswith("/cancel"):
+            job_id = path[len("/api/jobs/") : -len("/cancel")]
+            if not JOBS.cancel(job_id):
+                return self.send_json({"error": "This download is not active"}, status=409)
+            return self.send_json({"id": job_id, "cancelled": True})
         if path not in {"/api/download", "/api/pick-folder"}:
             return self.send_json({"error": "Not found"}, status=404)
         try:

@@ -234,6 +234,20 @@ class JobStore:
         with self._lock:
             return self._cancel_events.setdefault(job_id, threading.Event())
 
+    def cancel(self, job_id: str) -> bool:
+        """Cancel one job. Running jobs stop at their next progress check."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job["status"] not in {"queued", "running"}:
+                return False
+            self._cancel_events.setdefault(job_id, threading.Event()).set()
+            if job["status"] == "queued":
+                job.update(
+                    status="cancelled", stage="Cancelled", finishedAt=now_ms(), updatedAt=now_ms()
+                )
+                self._persist_locked(force=True)
+            return True
+
     def cancel_all(self) -> None:
         with self._lock:
             for job_id, event in self._cancel_events.items():
@@ -336,6 +350,8 @@ def run_download_job(job_id: str) -> None:
                 job_id,
                 stage="Downloading selected file",
                 progress=max(0, min(100, percent)),
+                downloadedBytes=progress.downloaded_bytes,
+                totalBytes=progress.total_bytes,
                 rateBytes=progress.rate_bytes_per_second,
                 peers=progress.peers,
             )

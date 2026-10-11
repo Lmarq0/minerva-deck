@@ -55,7 +55,8 @@ AUXILIARY_PATH_MARKERS = (
     "/all_non-zipped_content/", "/themes/", "/soundtrack/", "/boxart/", "/box art/",
     "/audio cd/", "/audio cd -", "/nintendo - nintendo music (",
     "/spc music/", "/vgm music/", "/nsf music/", "/sid music/", "/psf music/",
-    "/tosec-pix/", "/game guides/",
+    "/tosec-pix/", "/game guides/", "/unofficial - video game scans",
+    "/unofficial - magazine scans", "/unofficial - video game osts",
 )
 
 
@@ -129,6 +130,45 @@ def useful_catalog_section(value: str) -> bool:
         or normalized.startswith("item manager")
         or normalized.startswith("mirror ")
         or normalized in {"extras", "support files", "miscellaneous", "roms", "files"}
+    )
+
+
+VERIFIED_COLLECTIONS = {"No-Intro", "Redump"}
+REGION_ORDER = ("USA", "World", "Europe", "Japan")
+UNOFFICIAL_TAGS = re.compile(
+    r"\b(beta|proto|prototype|demo|sample|pirate|hack|unl|aftermarket|kiosk|debug)\b|\[[bhfopt]",
+    re.IGNORECASE,
+)
+MAX_GROUP_VARIANTS = 40
+# Rows fetched and games collected before ranking, so popular series that
+# sort late in SQL can still reach the top results.
+SEARCH_ROW_LIMIT = 1500
+SEARCH_GROUP_POOL = 300
+
+
+def split_title(file_name: str) -> Tuple[str, str]:
+    """Split "Game (USA) (Rev 1).zip" into ("Game", "USA · Rev 1")."""
+    stem = re.sub(r"\.(tar\.(gz|bz2|xz)|[A-Za-z0-9]{1,6})$", "", file_name)
+    match = re.search(r"\s*[(\[]", stem)
+    if not match:
+        return stem.strip(), ""
+    tags = re.findall(r"[(\[]([^)\]]*)[)\]]", stem[match.start():])
+    return stem[: match.start()].strip(), " · ".join(tag.strip() for tag in tags if tag.strip())
+
+
+def display_title(title: str) -> str:
+    """No-Intro writes "Legend of Zelda, The - Subtitle"; show "The Legend of Zelda - Subtitle"."""
+    match = re.match(r"^(.*?), (The|A|An)( - .*)?$", title)
+    return f"{match.group(2)} {match.group(1)}{match.group(3) or ''}" if match else title
+
+
+def variant_rank(variant: Dict[str, Any]) -> Tuple[int, int, int]:
+    label = variant["label"]
+    region = variant["region"]
+    return (
+        1 if UNOFFICIAL_TAGS.search(label) else 0,
+        REGION_ORDER.index(region) if region in REGION_ORDER else len(REGION_ORDER),
+        len(label),
     )
 
 
@@ -436,6 +476,10 @@ class SearchIndex:
                 WHERE {where}
                 ORDER BY
                     CASE
+                        WHEN lower(d.path) LIKE 'no-intro/%' OR lower(d.path) LIKE 'redump/%' THEN 0
+                        ELSE 1
+                    END,
+                    CASE
                         -- "Title.ext" and "Title (USA).ext" both count as exact.
                         WHEN lower(substr(f.title, 1, length(f.title) - length(f.extension) - 1)) = ?
                             OR lower(f.title) LIKE ? THEN 0
@@ -452,56 +496,102 @@ class SearchIndex:
                 LIMIT ?
                 """,
                 parameters
-                + [normalized_query, normalized_query + " (%", normalized_query + "%", limit * 2],
+                + [normalized_query, normalized_query + " (%", normalized_query + "%", SEARCH_ROW_LIMIT],
             ).fetchall()
 
-        results: List[Dict[str, Any]] = []
-        seen = set()
+        # One result per game: versions (regions, revisions) are nested.
+        groups: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         for row in rows:
             normalized = normalize_minerva_path(
                 f'{row["directory"]}/{row["title"]}' if row["directory"] else row["title"]
             )
+            # Classification rules may be newer than the downloaded catalog.
+            if games_only and catalog_kind(normalized, row["extension"]) != "game":
+                continue
             parts = normalized.split("/")
             collection = parts[0] if len(parts) > 1 else ""
             section = parts[1] if len(parts) > 2 else ""
-            dedupe_key = normalized_match_text(re.sub(r"\.[^.]+$", "", row["title"]))
-            dedupe_key = (dedupe_key, row["extension"], section)
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
+            base_title, label = split_title(row["title"])
+            # Parallel sets of one system ("(Decrypted)"/"(Encrypted)") form one game.
+            section_base, _, section_qualifier = section.partition(" (")
             route = emudeck_route_for_path(normalized)
-            platform = (
-                route["system"]
-                if route
-                else section if useful_catalog_section(section) else "Unknown system"
+            # Verified No-Intro and Redump dumps of one system's game also merge.
+            owner = (
+                ("verified", route["folder"])
+                if collection in VERIFIED_COLLECTIONS and route
+                else (collection, section_base)
             )
-            results.append(
-                {
-                    "path": normalized,
-                    "normalizedPath": normalized,
-                    "fileName": row["title"],
+            key = (*owner, normalized_match_text(base_title))
+            group = groups.get(key)
+            if group is None:
+                if len(groups) >= SEARCH_GROUP_POOL:
+                    continue
+                platform = (
+                    route["system"]
+                    if route
+                    else section if useful_catalog_section(section) else "Unknown system"
+                )
+                group = groups[key] = {
+                    "title": display_title(base_title or row["title"]),
                     "collection": collection,
                     "system": platform,
                     "platform": platform,
+                    "verified": collection in VERIFIED_COLLECTIONS,
+                    # libretro-thumbnails uses No-Intro/Redump system names.
+                    "coverSystem": section if collection in VERIFIED_COLLECTIONS else None,
+                    "route": route,
+                    "variants": [],
+                }
+            variants = group["variants"]
+            if len(variants) >= MAX_GROUP_VARIANTS or any(
+                variant["fileName"] == row["title"] for variant in variants
+            ):
+                continue
+            variants.append(
+                {
+                    "set": section_qualifier.rstrip(")"),
+                    "path": normalized,
+                    "normalizedPath": normalized,
+                    "fileName": row["title"],
+                    "label": label or "Original",
                     "region": region_for_title(row["title"]),
                     "extension": row["extension"],
                     "kind": "game" if row["kind"] else "auxiliary",
                     "formatGroup": FORMAT_GROUP_NAMES.get(row["format_group"], ""),
-                    "route": route,
+                    "route": group["route"],
                     "torrentUrl": TORRENT_LIST_URL + quote(row["torrent"]),
                     "fileIndex": int(row["file_index"]) + 1,
                     "sizeBytes": int(row["size"]),
                     "size": format_bytes(int(row["size"])),
                 }
             )
-            if len(results) >= limit:
-                break
+
+        results = list(groups.values())
+        for group in results:
+            variants = group["variants"]
+            labels = [variant["label"] for variant in variants]
+            for variant in variants:
+                if labels.count(variant["label"]) > 1 and variant["set"]:
+                    variant["label"] = f'{variant["label"]} · {variant["set"]}'
+                del variant["set"]
+            variants.sort(key=variant_rank)
+        # Official, verified dumps first; then exact titles; then games with more
+        # versions, since widely released games ship in many regions.
+        results.sort(
+            key=lambda group: (
+                variant_rank(group["variants"][0])[0],
+                not group["verified"],
+                normalized_match_text(group["title"]) != normalized_query,
+                -len(group["variants"]),
+            )
+        )
+        results = results[:limit]
 
         total = int(total_row[0]) if total_row else 0
         return {
             "results": results,
             "total": total,
-            "more": total > len(results),
+            "more": total > sum(len(group["variants"]) for group in results),
             "indexing": self.status(),
         }
 

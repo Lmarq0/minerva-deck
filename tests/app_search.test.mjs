@@ -10,7 +10,7 @@ function harness(fetch) {
   const state = { searchRequest: 0, searchPollTimer: null };
   const elements = {
     query: { value: "fixture" }, searchCount: {},
-    gamesOnlyToggle: { checked: true }, formatFilter: { value: "" },
+    allFilesToggle: { checked: false },
   };
   const rendered = [];
   const errors = [];
