@@ -6,11 +6,7 @@ on:
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -20,18 +16,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-      - name: Install Linux runtime libraries
-        if: runner.os == 'Linux'
+      - name: Install runtime libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y libarchive13 libegl1 libgl1 libxkbcommon-x11-0
       - name: Install Python dependencies
         run: python -m pip install -e .
       - name: Validate imports
-        shell: bash
-        run: |
-          python -c "import libtorrent, PySide6"
-          if [ "$RUNNER_OS" = "Linux" ]; then python -c "import libarchive"; fi
+        run: python -c "import libarchive, libtorrent, PySide6"
       - name: Python tests
         run: python -m unittest discover -s tests -v
       - name: JavaScript tests
@@ -40,7 +32,6 @@ jobs:
           node --check public/static/controller.js
           node --test tests/controller_navigation.test.mjs tests/app_search.test.mjs
       - name: Packaged entry self-test prerequisites
-        if: runner.os == 'Linux'
         env:
           QT_QPA_PLATFORM: offscreen
         run: python minerva_deck.py --self-test

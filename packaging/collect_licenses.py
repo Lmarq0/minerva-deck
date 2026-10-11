@@ -101,9 +101,8 @@ def main() -> None:
     copy_tree_files(pyside_root / "LICENSES", args.output / "PySide6")
 
     if args.vcpkg_root:
-        for triplet in ("x64-windows", "x64-linux-dynamic"):
-            share = args.vcpkg_root / triplet / "share" / "libarchive"
-            copy_tree_files(share, args.output / "libarchive")
+        share = args.vcpkg_root / "x64-linux-dynamic" / "share" / "libarchive"
+        copy_tree_files(share, args.output / "libarchive")
 
 
 if __name__ == "__main__":

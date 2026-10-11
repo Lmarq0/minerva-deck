@@ -39,9 +39,6 @@ def app_data_dir() -> Path:
     override = os.environ.get("MINERVA_DECK_HOME")
     if override:
         return Path(override).expanduser()
-    if os.name == "nt":
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / "MinervaDeck"
     base = os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
     return Path(base) / "minerva-deck"
 
@@ -58,8 +55,6 @@ def ensure_dirs() -> None:
 
 
 def default_destination() -> str:
-    if os.name == "nt":
-        return str(Path.home() / "Emulation" / "roms")
     deck_sd = Path("/run/media/deck/SDeck/Emulation/roms")
     if deck_sd.exists():
         return str(deck_sd)

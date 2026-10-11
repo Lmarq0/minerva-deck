@@ -43,4 +43,4 @@ The UI is plain HTML/JS in `public/`, shown in a Qt WebEngine window and served 
 
 On Ubuntu 22.04 (for a conservative glibc baseline), install the packages listed in `.github/workflows/release.yml`, then run `./build-deck.sh`. Output goes to `dist/`.
 
-Pushing a `v*` tag builds the AppImage and publishes a GitHub release. The search catalog is rebuilt every Monday by the Catalog workflow (or run it manually) and published to the `catalog` release. Windows builds are no longer published; `build-windows.ps1` still works for local builds.
+Pushing a `v*` tag builds the AppImage and publishes a GitHub release. The search catalog is rebuilt every Monday by the Catalog workflow (or run it manually) and published to the `catalog` release.

@@ -53,15 +53,6 @@ class ReleaseMetadataTest(unittest.TestCase):
         assert releases is not None
         self.assertEqual(releases[0].attrib["version"], version)
 
-        windows_spec = configparser.ConfigParser()
-        windows_spec.read(
-            ROOT / "packaging" / "windows.pysidedeploy.spec",
-            encoding="utf-8",
-        )
-        extra_args = windows_spec["nuitka"]["extra_args"]
-        self.assertIn(f"--windows-file-version={version}.0", extra_args)
-        self.assertIn(f"--windows-product-version={version}.0", extra_args)
-
     def test_build_dependency_pins_are_consistent(self) -> None:
         project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))
         zstandard = next(
@@ -70,11 +61,9 @@ class ReleaseMetadataTest(unittest.TestCase):
             if dependency.startswith("zstandard==")
         )
 
-        for spec_name in ("windows.pysidedeploy.spec", "deck.pysidedeploy.spec"):
-            spec = configparser.ConfigParser()
-            spec.read(ROOT / "packaging" / spec_name, encoding="utf-8")
-            packages = spec["python"]["packages"].split(",")
-            self.assertIn(zstandard, packages)
+        spec = configparser.ConfigParser()
+        spec.read(ROOT / "packaging" / "deck.pysidedeploy.spec", encoding="utf-8")
+        self.assertIn(zstandard, spec["python"]["packages"].split(","))
 
 
 class CatalogHelpersTest(unittest.TestCase):
