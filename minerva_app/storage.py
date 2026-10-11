@@ -16,7 +16,6 @@ from .utils import path_stem_for_archive, safe_filename
 
 
 LIBARCHIVE_EXPECTED_VERSION = "3.8.7"
-_DLL_DIRECTORY_HANDLE = None
 
 
 @dataclass
@@ -26,7 +25,6 @@ class ExtractionResult:
 
 
 def _libarchive():
-    global _DLL_DIRECTORY_HANDLE
     configured = os.environ.get("LIBARCHIVE")
     bundled = (
         Path(configured).expanduser()
@@ -35,9 +33,6 @@ def _libarchive():
     )
     if bundled:
         os.environ.setdefault("LIBARCHIVE", str(bundled))
-        if os.name == "nt" and hasattr(os, "add_dll_directory"):
-            if _DLL_DIRECTORY_HANDLE is None:
-                _DLL_DIRECTORY_HANDLE = os.add_dll_directory(str(bundled.parent))
     try:
         import libarchive
     except (ImportError, OSError, TypeError) as exc:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import os
 import secrets
 import sys
@@ -96,17 +95,6 @@ def _show_startup_failure(exc: Exception, log_path: Path) -> None:
         f"{exc}\n\n"
         f"Diagnostic details were written to:\n{log_path}"
     )
-    if os.name == "nt":
-        try:
-            ctypes.windll.user32.MessageBoxW(
-                None,
-                message,
-                f"{APP_NAME} - Startup error",
-                0x00000010,
-            )
-            return
-        except Exception:
-            pass
     print(message, file=sys.stderr)
 
 

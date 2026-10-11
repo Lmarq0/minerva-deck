@@ -25,11 +25,7 @@ def public_root() -> Path:
 
 
 def native_library_path(stem: str) -> Optional[Path]:
-    names = (
-        (f"{stem}.dll", f"lib{stem}.dll")
-        if os.name == "nt"
-        else (f"lib{stem}.so", f"lib{stem}.so.13", f"lib{stem}.so.19")
-    )
+    names = (f"lib{stem}.so", f"lib{stem}.so.13", f"lib{stem}.so.19")
     roots = (
         resource_root(),
         resource_root() / "native",
@@ -41,8 +37,7 @@ def native_library_path(stem: str) -> Optional[Path]:
             candidate = root / name
             if candidate.is_file():
                 return candidate
-        pattern = f"*{stem}*.dll" if os.name == "nt" else f"lib{stem}.so*"
-        for candidate in sorted(root.glob(pattern)):
+        for candidate in sorted(root.glob(f"lib{stem}.so*")):
             if candidate.is_file():
                 return candidate
     return None

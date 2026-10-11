@@ -17,7 +17,7 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 "$VENV/bin/python" -m pip install --upgrade pip
 "$VENV/bin/python" -m pip install -e '.[build]'
-QT_QPA_PLATFORM=offscreen "$VENV/bin/python" packaging/generate_icons.py --png-only
+QT_QPA_PLATFORM=offscreen "$VENV/bin/python" packaging/generate_icons.py
 
 if [ ! -d "$VCPKG/.git" ]; then
   git clone https://github.com/microsoft/vcpkg.git "$VCPKG"
