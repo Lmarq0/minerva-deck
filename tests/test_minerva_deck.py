@@ -500,6 +500,24 @@ class TorrentSelectionTest(unittest.TestCase):
         downloader.torrent_engine_status()["ready"],
         "libtorrent runtime is not installed",
     )
+    def test_torrents_larger_than_ten_megabytes_load(self) -> None:
+        # Redump's Xbox 360 torrent is 10,003,465 bytes, just over libtorrent's default limit.
+        pieces = 640_000
+        info = (
+            b"d6:lengthi" + str(pieces * 16384).encode() + b"e4:name8:big.file"
+            b"12:piece lengthi16384e6:pieces" + str(pieces * 20).encode() + b":"
+            + b"\x00" * (pieces * 20) + b"e"
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            torrent = Path(folder) / "large.torrent"
+            torrent.write_bytes(b"d4:info" + info + b"e")
+            self.assertGreater(torrent.stat().st_size, 10_000_000)
+            self.assertEqual(downloader.load_torrent_info(torrent).num_pieces(), pieces)
+
+    @unittest.skipUnless(
+        downloader.torrent_engine_status()["ready"],
+        "libtorrent runtime is not installed",
+    )
     def test_selective_download_from_local_web_seed(self) -> None:
         import libtorrent as lt
 
