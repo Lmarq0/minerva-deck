@@ -41,6 +41,17 @@ def configure_ca_certificates() -> None:
             return
 
 
+def ca_certificates_available() -> bool:
+    """True if OpenSSL has a CA bundle or a non-empty CA directory to verify with."""
+    defaults = ssl.get_default_verify_paths()
+    if defaults.cafile:
+        return True
+    try:
+        return bool(defaults.capath) and any(os.scandir(defaults.capath))
+    except OSError:
+        return False
+
+
 def json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 

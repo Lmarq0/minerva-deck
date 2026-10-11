@@ -5,14 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import ssl
 
 from .catalog import SEARCH_INDEX
 from .config import APP_NAME, DATA_DIR, DEFAULT_PORT, PUBLIC_ROOT, ensure_dirs
 from .downloader import torrent_engine_status
 from .server import create_server
 from .storage import archive_engine_status
-from .utils import configure_ca_certificates
+from .utils import ca_certificates_available, configure_ca_certificates
 
 
 def run_server(host: str, port: int) -> int:
@@ -38,7 +37,7 @@ def run_self_test() -> int:
         and (PUBLIC_ROOT / "static" / "controller.js").is_file(),
         "torrentDownload": torrent_engine_status()["ready"],
         "archiveExtraction": archive_engine_status()["ready"],
-        "tls": ssl.create_default_context().cert_store_stats()["x509_ca"] > 0,
+        "tls": ca_certificates_available(),
     }
     try:
         from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
