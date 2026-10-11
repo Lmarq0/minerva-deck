@@ -17,7 +17,6 @@ const state = {
   selectionRequest: 0,
   searchAbort: null,
   selectionAbort: null,
-  browse: { mode: null, current: "", parent: null, previousFocus: null },
 };
 
 const sessionToken =
@@ -89,13 +88,6 @@ const elements = {
   downloadsList: document.getElementById("downloadsList"),
   downloadsDetail: document.getElementById("downloadsDetail"),
   downloadFilters: Array.from(document.querySelectorAll("[data-download-filter]")),
-  browseDialog: document.getElementById("browseDialog"),
-  browseTitle: document.getElementById("browseTitle"),
-  browseCurrent: document.getElementById("browseCurrent"),
-  browseList: document.getElementById("browseList"),
-  browseCloseButton: document.getElementById("browseCloseButton"),
-  browseParentButton: document.getElementById("browseParentButton"),
-  browseSelectButton: document.getElementById("browseSelectButton"),
 };
 
 function escapeHtml(value) {
@@ -247,6 +239,10 @@ async function loadStatus() {
       state.status.capabilities?.archiveExtraction?.ready,
     );
     const runtimeReady = downloaderReady && archiveReady;
+    // The system folder dialog needs the desktop window; paths can still be typed.
+    const canPickFolders = Boolean(state.status.runtime?.desktop);
+    elements.browseRootButton.hidden = !canPickFolders;
+    elements.browseSubfolderButton.hidden = !canPickFolders;
 
     elements.setupStatus.classList.toggle("ready", runtimeReady);
     elements.setupStatusText.textContent = runtimeReady
@@ -905,76 +901,37 @@ function setActivityExpanded(expanded) {
   elements.activitySummary.setAttribute("aria-expanded", String(expanded));
 }
 
-async function openBrowser(mode) {
-  state.browse.mode = mode;
-  state.browse.previousFocus = document.activeElement;
-  elements.browseTitle.textContent = mode === "root" ? "EmuDeck ROMs root" : "System subfolder";
-  elements.browseDialog.showModal();
-  await browseTo(mode === "root" ? elements.destination.value : elements.routeOverride.value);
-  elements.browseSelectButton.focus();
-}
-
-function closeBrowser() {
-  if (elements.browseDialog.open) elements.browseDialog.close();
-}
-
-function resetBrowserState() {
-  const previous = state.browse.previousFocus;
-  state.browse = { mode: null, current: "", parent: null, previousFocus: null };
-  if (previous?.focus) previous.focus({ preventScroll: true });
-}
-
-async function browseTo(path) {
-  const mode = state.browse.mode;
-  if (!mode) return;
-  elements.browseList.innerHTML = `<div class="empty-note"><span>Loading folders…</span></div>`;
-  const params = new URLSearchParams({ mode, path: path || "" });
-  if (mode === "subfolder") params.set("root", elements.destination.value.trim());
+async function pickFolder(mode) {
+  const button = mode === "root" ? elements.browseRootButton : elements.browseSubfolderButton;
+  button.disabled = true;
   try {
-    const response = await apiFetch(`/api/browse?${params}`);
+    // Opens the system folder dialog; the request finishes when it closes.
+    const response = await apiFetch("/api/pick-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode,
+        root: elements.destination.value.trim(),
+        current: elements.routeOverride.value.trim(),
+      }),
+    });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Could not browse this folder");
-    renderBrowse(payload);
+    if (!response.ok) throw new Error(payload.error || "Could not open the folder dialog");
+    if (!payload.path) return;
+    if (mode === "root") {
+      elements.destination.value = payload.path;
+      localStorage.setItem("minerva.destination", payload.path);
+    } else {
+      elements.routeOverride.value = payload.path;
+    }
+    updateDestinationSummary();
+    updateDownloadButton();
   } catch (error) {
-    elements.browseList.innerHTML = `<div class="empty-note error"><span>${escapeHtml(error.message)}</span></div>`;
+    elements.destinationHint.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.focus({ preventScroll: true });
   }
-}
-
-function renderBrowse(payload) {
-  state.browse.current = payload.current || "";
-  state.browse.parent = payload.parent ?? null;
-  elements.browseCurrent.textContent = payload.mode === "subfolder"
-    ? `/${payload.current || ""}`
-    : payload.current || "Computer";
-  elements.browseParentButton.disabled = payload.parent === null;
-
-  if (!payload.entries?.length) {
-    elements.browseList.innerHTML = `<div class="empty-note"><span>No child folders here.</span></div>`;
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  for (const entry of payload.entries) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "browse-entry";
-    button.textContent = entry.name;
-    button.addEventListener("click", () => browseTo(entry.path));
-    fragment.appendChild(button);
-  }
-  elements.browseList.replaceChildren(fragment);
-}
-
-function selectBrowsedPath() {
-  if (state.browse.mode === "root") {
-    elements.destination.value = state.browse.current;
-    localStorage.setItem("minerva.destination", elements.destination.value);
-  } else if (state.browse.mode === "subfolder") {
-    elements.routeOverride.value = state.browse.current;
-  }
-  updateDestinationSummary();
-  updateDownloadButton();
-  closeBrowser();
 }
 
 function bindEvents() {
@@ -1002,8 +959,8 @@ function bindEvents() {
     updateDestinationSummary();
     updateDownloadButton();
   });
-  elements.browseRootButton.addEventListener("click", () => openBrowser("root"));
-  elements.browseSubfolderButton.addEventListener("click", () => openBrowser("subfolder"));
+  elements.browseRootButton.addEventListener("click", () => pickFolder("root"));
+  elements.browseSubfolderButton.addEventListener("click", () => pickFolder("subfolder"));
   elements.downloadButton.addEventListener("click", startDownload);
   elements.dismissSetupButton.addEventListener("click", () => {
     sessionStorage.setItem("minerva.dismissedSetup", "1");
@@ -1032,12 +989,6 @@ function bindEvents() {
     if (!item) return;
     openDownloads(item.dataset.downloadJob);
   });
-  elements.browseCloseButton.addEventListener("click", closeBrowser);
-  elements.browseDialog.addEventListener("close", resetBrowserState);
-  elements.browseParentButton.addEventListener("click", () => {
-    if (state.browse.parent !== null) browseTo(state.browse.parent);
-  });
-  elements.browseSelectButton.addEventListener("click", selectBrowsedPath);
   document.addEventListener("keydown", handleControllerKeyboard);
 }
 
@@ -1055,9 +1006,7 @@ async function init() {
 function controllerTargets() {
   const root = !elements.downloadsDialog.hidden
     ? elements.downloadsDialog
-    : elements.browseDialog.open
-      ? elements.browseDialog
-      : document;
+    : document;
   return Array.from(
     root.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), summary"),
   ).filter((element) => {
@@ -1076,10 +1025,6 @@ function handleControllerKeyboard(event) {
   if (event.key === "Escape") {
     if (!elements.downloadsDialog.hidden) {
       closeDownloads();
-      return;
-    }
-    if (elements.browseDialog.open) {
-      closeBrowser();
       return;
     }
   }
@@ -1174,7 +1119,6 @@ function acceptControllerAction() {
 
 function cancelControllerAction() {
   if (!elements.downloadsDialog.hidden) closeDownloads();
-  else if (elements.browseDialog.open) closeBrowser();
   else if (elements.advancedOptions.open) elements.advancedOptions.open = false;
   else elements.query.focus({ preventScroll: true });
 }

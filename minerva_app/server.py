@@ -10,12 +10,12 @@ import shutil
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 
-from .browsing import browse_root_payload, browse_subfolder_payload
+from .browsing import FolderPicker, pick_folder_payload
 from .catalog import SEARCH_INDEX
 from .config import (
     APP_NAME,
@@ -38,6 +38,7 @@ class AppHandler(BaseHTTPRequestHandler):
     server_version = f"MinervaDeck/{APP_VERSION}"
     session_token = ""
     desktop_runtime = False
+    folder_picker: Optional[FolderPicker] = None
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -79,21 +80,6 @@ class AppHandler(BaseHTTPRequestHandler):
                 {"route": None, "error": "No EmuDeck folder mapping found"},
                 status=404,
             )
-        if path == "/api/browse":
-            query = parse_qs(parsed.query)
-            try:
-                if query.get("mode", ["root"])[0] == "subfolder":
-                    return self.send_json(
-                        browse_subfolder_payload(
-                            query.get("root", [""])[0],
-                            query.get("path", [""])[0],
-                        )
-                    )
-                return self.send_json(
-                    browse_root_payload(query.get("path", [""])[0])
-                )
-            except Exception as exc:
-                return self.send_json({"error": str(exc)}, status=400)
         if path == "/api/metadata":
             query = parse_qs(parsed.query)
             try:
@@ -120,7 +106,7 @@ class AppHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path.startswith("/api/") and not self.api_authorized():
             return self.send_json({"error": "Forbidden"}, status=403)
-        if path != "/api/download":
+        if path not in {"/api/download", "/api/pick-folder"}:
             return self.send_json({"error": "Not found"}, status=404)
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -132,14 +118,33 @@ class AppHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(payload, dict):
                 return self.send_json(
-                    {"error": "Download request must be an object"},
+                    {"error": "Request body must be an object"},
                     status=400,
                 )
+            if path == "/api/pick-folder":
+                return self.pick_folder(payload)
             job_id = JOBS.create(payload)
             JOBS.ensure_worker()
             return self.send_json({"id": job_id, "status": "queued"}, status=201)
         except Exception as exc:
             return self.send_json({"error": str(exc)}, status=500)
+
+    def pick_folder(self, payload: Dict[str, Any]) -> None:
+        if self.folder_picker is None:
+            return self.send_json(
+                {"error": "The folder dialog is only available in the desktop app"},
+                status=501,
+            )
+        try:
+            result = pick_folder_payload(
+                self.folder_picker,
+                str(payload.get("mode", "")),
+                str(payload.get("root", "")),
+                str(payload.get("current", "")),
+            )
+        except RuntimeError as exc:
+            return self.send_json({"error": str(exc)}, status=400)
+        return self.send_json(result)
 
     def do_HEAD(self) -> None:
         parsed = urlparse(self.path)
@@ -295,6 +300,7 @@ def create_server(
     *,
     desktop_runtime: bool = False,
     session_token: str = "",
+    folder_picker: Optional[FolderPicker] = None,
 ) -> ThreadingHTTPServer:
     token = session_token or secrets.token_urlsafe(32)
 
@@ -303,6 +309,9 @@ def create_server(
 
     RuntimeHandler.session_token = token
     RuntimeHandler.desktop_runtime = desktop_runtime
+    RuntimeHandler.folder_picker = (
+        staticmethod(folder_picker) if folder_picker else None
+    )
     server = ThreadingHTTPServer((host, port), RuntimeHandler)
     server.daemon_threads = True
     return server

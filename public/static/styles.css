@@ -1496,24 +1496,6 @@ body.downloads-open {
   max-height: 165px;
 }
 
-.dialog {
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: 20px;
-  box-shadow: 0 28px 100px rgba(0, 0, 0, 0.58);
-  color: var(--text);
-  gap: 13px;
-  grid-template-rows: auto auto minmax(220px, 1fr) auto;
-  height: min(660px, calc(100dvh - 40px));
-  max-width: 720px;
-  padding: 18px;
-  width: min(720px, calc(100vw - 40px));
-}
-
-.dialog[open] {
-  display: grid;
-}
-
 @media (max-width: 760px) {
   .downloads-dialog {
     height: calc(100dvh - 18px);
@@ -1542,75 +1524,6 @@ body.downloads-open {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
   }
-}
-
-.dialog::backdrop {
-  background: rgba(3, 5, 9, 0.76);
-  backdrop-filter: blur(6px);
-}
-
-.dialog-head {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-}
-
-.dialog-head h2 {
-  font-size: 1.3rem;
-  letter-spacing: -0.03em;
-  margin: 0;
-}
-
-.browse-current {
-  background: #0b1018;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 0.7rem;
-  overflow-wrap: anywhere;
-  padding: 10px;
-}
-
-.browse-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-  overflow: auto;
-  padding: 2px;
-}
-
-.browse-entry {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 11px;
-  color: var(--text-soft);
-  min-height: 44px;
-  padding: 8px 11px;
-  text-align: left;
-}
-
-.browse-entry::before {
-  color: var(--warn);
-  content: "▰";
-  font-size: 0.7rem;
-  margin-right: 9px;
-}
-
-.browse-entry:hover {
-  background: var(--surface-hover);
-  border-color: var(--line);
-}
-
-.dialog-actions {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr);
-}
-
-.dialog-actions button {
-  min-height: 46px;
 }
 
 @media (max-width: 900px) {

@@ -18,6 +18,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from minerva_app import (
+    browsing,
     catalog,
     config,
     desktop,
@@ -293,6 +294,59 @@ class CertificateTest(unittest.TestCase):
                 mock.patch.object(utils.ssl, "get_default_verify_paths", self.missing_defaults):
             utils.configure_ca_certificates()
             self.assertEqual(utils.os.environ["SSL_CERT_FILE"], "/custom.pem")
+class FolderPickerTest(unittest.TestCase):
+    def test_root_mode_returns_the_chosen_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            picker = mock.Mock(return_value=folder)
+            result = browsing.pick_folder_payload(picker, "root", folder, "")
+            self.assertEqual(result, {"path": folder})
+            picker.assert_called_once_with("Choose your EmuDeck ROMs folder", folder)
+
+    def test_cancelled_dialog_returns_no_path(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            picker = mock.Mock(return_value="")
+            self.assertEqual(browsing.pick_folder_payload(picker, "root", folder, "")["path"], None)
+            self.assertEqual(browsing.pick_folder_payload(picker, "subfolder", folder, "")["path"], None)
+
+    def test_subfolder_mode_returns_a_path_relative_to_the_root(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "wiiu" / "roms").mkdir(parents=True)
+            picker = mock.Mock(return_value=str(root / "wiiu" / "roms"))
+            result = browsing.pick_folder_payload(picker, "subfolder", folder, "wiiu")
+            self.assertEqual(result, {"path": "wiiu/roms"})
+            self.assertEqual(picker.call_args.args[1], str(root / "wiiu"))
+
+    def test_subfolder_outside_the_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as other:
+            for chosen in (other, folder):
+                picker = mock.Mock(return_value=chosen)
+                with self.assertRaisesRegex(RuntimeError, "Choose a folder inside"):
+                    browsing.pick_folder_payload(picker, "subfolder", folder, "")
+
+    def test_endpoint_requires_the_desktop_dialog(self) -> None:
+        for picker, expected in ((None, 501), (lambda title, start: "/tmp", 200)):
+            httpd = server.create_server(session_token="token", folder_picker=picker)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = Request(
+                    f"http://127.0.0.1:{httpd.server_address[1]}/api/pick-folder",
+                    data=json.dumps({"mode": "root", "root": "/tmp"}).encode(),
+                    headers={"X-Minerva-Session": "token", "Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urlopen(request, timeout=5) as response:
+                        status, body = response.status, json.load(response)
+                except HTTPError as error:
+                    status, body = error.code, json.load(error)
+                self.assertEqual(status, expected)
+                if expected == 200:
+                    self.assertEqual(body, {"path": "/tmp"})
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
 
 
 class PathSafetyTest(unittest.TestCase):
